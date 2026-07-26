@@ -2,9 +2,11 @@
 
 **A command-line App Store Optimization advisor for your app metadata.**
 It reads the metadata that you keep in your own repository, finds the waste and
-the gaps, and remembers every suggestion between runs. It also reads the public
+the gaps, and remembers every suggestion between runs. It reads the public
 endpoints of Apple for real search positions, competitor moves, autocomplete
-data, and your reviews. No account, no key, no subscription.
+data, and your reviews. It proposes the target phrases to chase. And it can
+pull your live metadata from App Store Connect, then push the text, the
+screenshots, and the app previews back.
 
 [![CI](https://github.com/AdmTal/aso-advisor/actions/workflows/ci.yml/badge.svg)](https://github.com/AdmTal/aso-advisor/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -57,14 +59,17 @@ you dismissed.
 ## Install
 
 ```bash
-pipx install aso-advisor      # recommended: an isolated tool install
+pipx install aso-advisor              # recommended: an isolated tool install
+pipx install 'aso-advisor[sync]'      # with the App Store Connect commands
 # or
-pip install aso-advisor
+pip install 'aso-advisor[sync]'
 # or, from the source
 git clone https://github.com/AdmTal/aso-advisor.git && pip install -e aso-advisor
 ```
 
-Python 3.9 or later. The only dependency is PyYAML.
+Python 3.9 or later. The audit needs PyYAML and nothing else. The `sync` extra
+adds PyJWT, which `aso pull`, `aso push`, and `aso push-assets` use to sign the
+token that Apple asks for.
 
 ## Sixty-second start
 
@@ -78,10 +83,14 @@ file, a strategy file, and a first version directory. Put your live metadata
 into the version YAML, then:
 
 ```bash
+aso pull         # or fill the version YAML by hand
 aso audit        # audit the newest version, write a report
 aso list         # the open suggestions
 aso show S-1a2b3c4d
 aso dismiss S-1a2b3c4d "a deliberate bet"
+aso phrases      # propose the target search phrases
+aso push         # send the metadata back to App Store Connect
+aso push-assets  # upload the localized screenshots and videos
 ```
 
 Read the [getting-started guide](docs/getting-started.md) for the full
@@ -162,6 +171,32 @@ The tool never writes to App Store Connect. The full specification is in
 Every rule, with its severity and its reason, is in
 [docs/rules.md](docs/rules.md).
 
+## The target phrases, proposed for you
+
+`phrase_targets` drives the most valuable rule of the tool. You do not have to
+invent the list. Ask the store:
+
+```bash
+aso phrases --write
+```
+
+```
+  score  phrase                          coverage                 why
+     10  offline hiking maps             needs offline (en-US)    autocomplete #1
+      9  hiking gps tracker              needs tracker (en-US)    autocomplete #2; 2 roots
+      8  trail map offline               covered by en-US         autocomplete #3
+      7  backpacking route planner       needs planner (en-US)    in the title of Trail Buddy
+```
+
+The candidates come from the App Store autocomplete (Apple sorts it by
+popularity), from the titles of the competitors that you track, and from the
+words of your own reviews. The command drops the app names that the
+autocomplete mixes in, lowers the score of a phrase that holds a word the store
+ignores, and marks the phrases that a trademark makes risky. `--write` puts the
+strong ones into your strategy file.
+
+[docs/keyword-research.md](docs/keyword-research.md) explains the method.
+
 ## Live data from the public endpoints of Apple
 
 Five commands read the store itself. They need no account and no key. The tool
@@ -186,6 +221,32 @@ aso verify-groups   # a live test of the cross-localization table
   backpacking route planner                —  lost (was #91) Trail Buddy
 ```
 
+## Pull and push, with your own App Store Connect key
+
+The workspace is not read-only. With an API key that you make yourself, the
+whole loop lives in your repository:
+
+```bash
+aso auth            # the steps to make a key, then a check that Apple accepts it
+aso pull            # the live metadata of every locale, into the workspace
+aso push --dry-run  # exactly what a push would change
+aso push            # send the text back
+aso push-assets     # upload the localized screenshots and app previews
+```
+
+`aso push-assets` uploads only the sets that changed: App Store Connect keeps
+a checksum per asset, and the tool compares it with your files. It reads the
+assets tree of the workspace, or any tree that you point it at with `--dir`,
+including the folder names that design tools produce
+(`English (en-US)/iOS Phones 6.9/01.png`).
+
+Two guards run before a push: the field lengths, and the audit. A CRITICAL
+finding stops the push, so a field that is too long fails on your machine and
+not one hour later in App Store Connect.
+
+[docs/app-store-connect.md](docs/app-store-connect.md) has the key steps, the
+security rules, and the errors that you will meet.
+
 ## In a build pipeline
 
 `aso audit --fail-on critical` returns exit code 2 when a suggestion is at that
@@ -207,6 +268,8 @@ A complete workflow file is in
 | [Getting started](docs/getting-started.md) | Install, first workspace, first fix. Start here. |
 | [The workspace](docs/workspace.md) | The folder specification and every configuration field. |
 | [Commands](docs/commands.md) | Every command and every option. |
+| [Keyword research](docs/keyword-research.md) | Where the target phrases come from, and how `aso phrases` builds them. |
+| [App Store Connect](docs/app-store-connect.md) | Make an API key, then pull, push, and upload the assets. |
 | [Workflows](docs/workflows.md) | How people use the tool: the weekly loop, the release ritual, a keyword sprint, CI, many apps, AI assistants. |
 | [Rules](docs/rules.md) | Every audit rule: what it finds, why, and how to fix it. |
 | [Concepts](docs/concepts.md) | The App Store search mechanics that the rules encode, with sources. |
@@ -214,14 +277,15 @@ A complete workflow file is in
 
 ## What the tool does not do
 
-- It does not write to App Store Connect. It reads YAML files that you control.
-  Use `fastlane deliver` or the App Store Connect API to publish.
 - It does not know your search volume. Nobody outside Apple does. The tool uses
   the popularity order of the autocomplete, which is the best free substitute.
+- It does not build, sign, or release your app. Keep fastlane for that. This
+  tool covers the metadata, the screenshots, and the app previews.
 - It does not support Google Play yet. The rule engine is store-agnostic, so
   the work is possible. Issues and pull requests are welcome.
-- It does not send your data anywhere. The only network requests go to the
-  public endpoints of Apple, and only when you run a live command.
+- It does not send your data anywhere except to Apple: to the public endpoints
+  when you run a live command, and to App Store Connect when you push. There is
+  no server, and there is no account.
 
 ## Contributing
 

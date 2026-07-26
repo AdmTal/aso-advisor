@@ -11,7 +11,7 @@ help:
 	@echo "clean     remove the build output and the caches"
 
 install:
-	pip install -e '.[dev]'
+	pip install -e '.[dev,sync]'
 
 test:
 	pytest

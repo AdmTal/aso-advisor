@@ -100,6 +100,23 @@ in the fields by hand.
 The advisor audits what you give it, so the audit is only correct when the YAML
 matches the store. You have three ways to fill it.
 
+### With `aso pull` (the fastest way)
+
+If you have an App Store Connect API key, one command fills the workspace:
+
+```bash
+pipx install 'aso-advisor[sync]'
+aso auth          # it prints the steps when you have no key yet
+aso pull
+```
+
+`aso pull` reads the live metadata of every locale and writes it into
+`aso/versions/<the live version>/`. Read
+[app-store-connect.md](app-store-connect.md) for the key.
+
+Later, the same key lets you publish from the workspace with `aso push` and
+`aso push-assets`, so the whole loop lives in your repository.
+
 ### By hand (10 minutes, and you learn the layout)
 
 Open App Store Connect and copy the values into
@@ -247,6 +264,15 @@ phrase_targets:
     score: 9
 ```
 
+You do not have to invent this list. Ask the store:
+
+```bash
+aso phrases            # proposals from the autocomplete and your competitors
+aso phrases --write    # add the strong ones to strategy.yaml
+```
+
+[keyword-research.md](keyword-research.md) explains the method and the scores.
+
 **`competitors`** — the apps to watch. To find the identifiers, ask the store:
 
 ```bash
@@ -304,6 +330,10 @@ Each command explains its own output. Read
 
 ## What next
 
+- [Keyword research](keyword-research.md) — where the target phrases come
+  from, and how `aso phrases` builds the first list.
+- [App Store Connect](app-store-connect.md) — make an API key, then pull,
+  push, and upload the screenshots from the workspace.
 - [Workflows](workflows.md) — the weekly loop, the release ritual, a keyword
   research sprint, CI, many apps, and how to use an AI assistant with the
   reports.

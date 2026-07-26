@@ -26,6 +26,7 @@ from pathlib import Path
 
 import yaml
 
+from . import yamlio
 from .storefronts import STOREFRONT_GROUPS
 
 CONFIG_NAME = 'aso.yaml'
@@ -200,6 +201,21 @@ class AssetSettings:
 
 
 @dataclass
+class AscSettings:
+    """Where the App Store Connect key lives.
+
+    Environment variables win over these values. Never put the key itself in
+    this file: give the path of the .p8 file, and keep the file out of version
+    control.
+    """
+
+    key_id: str = ''
+    issuer_id: str = ''
+    private_key_path: str = ''
+    app_id: str = ''
+
+
+@dataclass
 class Config:
     app: AppIdentity = field(default_factory=AppIdentity)
     rank_countries: list = field(default_factory=lambda: ['us'])
@@ -207,6 +223,7 @@ class Config:
     storefront_groups: dict = field(default_factory=lambda: dict(STOREFRONT_GROUPS))
     group_filter: list = field(default_factory=list)
     assets: AssetSettings = field(default_factory=AssetSettings)
+    asc: AscSettings = field(default_factory=AscSettings)
     disabled_rules: set = field(default_factory=set)
     cache_hours: int = 12
 
@@ -243,6 +260,13 @@ class Config:
             required_locales=[str(c) for c in _as_list(asset_data.get('required_locales'))],
             device_sizes=device_sizes,
         )
+        asc_data = data.get('asc') or {}
+        asc = AscSettings(
+            key_id=str(asc_data.get('key_id', '') or ''),
+            issuer_id=str(asc_data.get('issuer_id', '') or ''),
+            private_key_path=str(asc_data.get('private_key_path', '') or ''),
+            app_id=str(asc_data.get('app_id', '') or ''),
+        )
         audit = data.get('audit') or {}
         return cls(
             app=app,
@@ -253,6 +277,7 @@ class Config:
             storefront_groups=groups,
             group_filter=[str(g).upper() for g in _as_list(markets.get('storefront_groups'))],
             assets=assets,
+            asc=asc,
             disabled_rules={str(r).upper() for r in _as_list(audit.get('disable_rules'))},
             cache_hours=int(data.get('cache_hours', 12)),
         )
@@ -312,7 +337,7 @@ def _read_yaml(path):
     if not path.exists():
         return {}
     try:
-        return yaml.safe_load(path.read_text(encoding='utf-8')) or {}
+        return yamlio.load(path.read_text(encoding='utf-8')) or {}
     except yaml.YAMLError as exc:
         raise WorkspaceError(f'{path} is not valid YAML:\n{exc}') from exc
 

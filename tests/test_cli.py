@@ -300,3 +300,109 @@ def test_the_example_workspace_teaches_the_phrase_rule(capsys):
     data = json.loads(capsys.readouterr().out)
     phrases = [s for s in data['suggestions'] if s['rule'] == 'PHRASE']
     assert any('offline hiking maps' in s['title'] for s in phrases)
+
+
+# -- App Store Connect commands (no network) ----------------------------------
+
+def test_auth_without_credentials_explains_how_to_make_a_key(ws, capsys, monkeypatch):
+    from aso_advisor.asc import client as asc
+
+    for name in (asc.ENV_KEY_ID, asc.ENV_ISSUER_ID, asc.ENV_KEY_PATH,
+                 asc.ENV_KEY_VALUE, asc.ENV_APP_ID):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.chdir(ws)
+    assert run(['auth'], workspace=ws) == cli.EXIT_ERROR
+    printed = capsys.readouterr().err
+    assert 'APP_STORE_CONNECT_KEY_ID' in printed
+    assert 'Users and Access' in printed
+
+
+def test_auth_shows_the_resolved_credentials(ws, capsys, monkeypatch):
+    from aso_advisor.asc import client as asc
+
+    key = ws / 'AuthKey_TEST.p8'
+    key.write_text('-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----\n')
+    monkeypatch.setenv(asc.ENV_KEY_ID, 'KEY123')
+    monkeypatch.setenv(asc.ENV_ISSUER_ID, 'ISSUER')
+    monkeypatch.setenv(asc.ENV_KEY_PATH, str(key))
+    monkeypatch.setenv(asc.ENV_APP_ID, '4242')
+    assert run(['auth'], workspace=ws) == 0
+    printed = capsys.readouterr().out
+    assert 'KEY123' in printed and '4242' in printed
+    assert 'BEGIN PRIVATE KEY' not in printed        # never print the key itself
+
+
+def test_push_stops_on_a_critical_finding(tmp_path, capsys, monkeypatch):
+    from aso_advisor.asc import push as push_module
+
+    workspace_dir = write_workspace(tmp_path / 'aso',
+                                    versions={'1.0': {'titles.yaml': BROKEN}})
+    monkeypatch.setattr(push_module, 'cmd_push',
+                        lambda *a, **k: pytest.fail('the push must not start'))
+    assert run(['push'], workspace=workspace_dir) == cli.EXIT_FINDINGS
+    assert 'App Store Connect will refuse' in capsys.readouterr().err
+
+
+def test_push_with_skip_audit_goes_on(tmp_path, monkeypatch):
+    from aso_advisor.asc import push as push_module
+
+    workspace_dir = write_workspace(tmp_path / 'aso',
+                                    versions={'1.0': {'titles.yaml': BROKEN}})
+    seen = {}
+
+    def fake_push(ws, locales, **kwargs):
+        seen['locales'] = locales
+        seen['dry_run'] = kwargs.get('dry_run')
+        return 0
+
+    monkeypatch.setattr(push_module, 'cmd_push', fake_push)
+    assert run(['push', '--skip-audit', '--dry-run'], workspace=workspace_dir) == 0
+    assert 'en-US' in seen['locales']
+    assert seen['dry_run'] is True
+
+
+def test_pull_passes_the_options(ws, monkeypatch):
+    from aso_advisor.asc import pull as pull_module
+
+    seen = {}
+
+    def fake_pull(workspace_arg, **kwargs):
+        seen.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(pull_module, 'cmd_pull', fake_pull)
+    assert run(['pull', '--editable', '--locale', 'de-DE'], workspace=ws) == 0
+    assert seen['from_editable'] is True
+    assert seen['locale'] == 'de-DE'
+
+
+def test_push_assets_reads_the_version_directory(ws, monkeypatch, capsys):
+    from aso_advisor.asc import media as media_module
+
+    seen = {}
+
+    def fake_push_assets(workspace_arg, **kwargs):
+        seen.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(media_module, 'cmd_push_assets', fake_push_assets)
+    assert run(['push-assets', '--dry-run'], workspace=ws) == 0
+    assert seen['assets_dir'] == ws / 'versions' / '1.0' / 'assets'
+    assert seen['dry_run'] is True
+    assert 'Reading the assets' in capsys.readouterr().out
+
+
+def test_phrases_prints_and_writes(ws, capsys, monkeypatch):
+    from aso_advisor import store_api
+
+    monkeypatch.setattr(store_api, 'hints', lambda _conn, term, **k:
+                        ['hike tracker with maps', 'trail gps'] if term else [])
+    monkeypatch.setattr(store_api, 'lookup', lambda *a, **k: [])
+    (ws / 'strategy.yaml').write_text('discovery_seeds: [hiking]\n', encoding='utf-8')
+    assert run(['phrases', '--write'], workspace=ws) == 0
+    printed = capsys.readouterr().out
+    assert 'Proposed target phrases' in printed
+    assert 'trail gps' in printed
+    text = (ws / 'strategy.yaml').read_text(encoding='utf-8')
+    assert 'phrase_targets:' in text
+    assert 'trail gps' in text

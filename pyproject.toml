@@ -4,13 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aso-advisor"
-version = "1.0.0"
+version = "1.1.0"
 description = "A command-line App Store Optimization advisor. It audits your versioned metadata, tracks the suggestions across runs, and reads live data from Apple's public endpoints."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.9"
 authors = [{ name = "Adam Tal" }]
-keywords = ["aso", "app-store", "ios", "keywords", "metadata", "cli", "localization"]
+keywords = ["aso", "app-store", "ios", "keywords", "metadata", "cli",
+            "localization", "app-store-connect", "screenshots", "fastlane"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
@@ -28,7 +29,9 @@ classifiers = [
 dependencies = ["PyYAML>=5.1"]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "ruff>=0.5"]
+# The App Store Connect commands (pull, push, push-assets) sign an ES256 token.
+sync = ["PyJWT[crypto]>=2.8"]
+dev = ["pytest>=7", "ruff>=0.5", "PyJWT[crypto]>=2.8"]
 
 [project.urls]
 Homepage = "https://github.com/AdmTal/aso-advisor"

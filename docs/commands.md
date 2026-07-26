@@ -9,11 +9,13 @@ same information in the terminal.
 - [`aso audit`](#aso-audit)
 - [`aso list` · `show` · `dismiss` · `reopen` · `history`](#the-lifecycle-of-a-suggestion)
 - [`aso versions` · `diff` · `assets` · `rules` · `where`](#the-workspace-commands)
+- [`aso phrases`](#aso-phrases)
 - [`aso rank`](#aso-rank)
 - [`aso competitors`](#aso-competitors)
 - [`aso discover`](#aso-discover)
 - [`aso reviews`](#aso-reviews)
 - [`aso verify-groups`](#aso-verify-groups)
+- [`aso auth` · `pull` · `push` · `push-assets`](#app-store-connect)
 - [`aso lookup` · `cache`](#the-helper-commands)
 
 ---
@@ -151,6 +153,46 @@ aso where         # every path that the tool resolved
 which workspace the tool found.
 
 ---
+
+## `aso phrases`
+
+Propose the target search phrases. This is the command that builds
+`phrase_targets`, which the coverage matrix and `aso rank` both use.
+
+```bash
+aso phrases
+aso phrases --country de --deep
+aso phrases --roots "trail map,hiking gps"
+aso phrases --with-reviews --limit 40
+aso phrases --write --min-score 7
+```
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `--country` | `app.default_country` | The storefront to read. |
+| `--roots` | | Extra comma-separated root terms for this run. |
+| `--deep` | | Expand the best completion one more level. |
+| `--with-reviews` | | Also mine the words of your recent reviews. |
+| `--limit` | 25 | How many rows to print. |
+| `--write` | | Add the strong proposals to `phrase_targets`. |
+| `--write-seeds` | | Add the one-word proposals to `seed_keywords`. |
+| `--min-score` | 6 | The lowest score that `--write` accepts. |
+| `--fresh` | | Do not use the cache. |
+
+```
+  score  phrase                          coverage                 why
+     10  offline hiking maps             needs offline (en-US)    autocomplete #1
+      9  hiking gps tracker              needs tracker (en-US)    autocomplete #2; 2 roots
+      8  trail map offline               covered by en-US         autocomplete #3
+```
+
+The candidates come from the App Store autocomplete, from the titles of your
+tracked competitors, and, with `--with-reviews`, from the words of your users.
+The score comes from the position in the autocomplete, with a bonus for a
+competitor title and a penalty for a low-value word or a trademark.
+
+`docs/keyword-research.md` explains the whole method.
+
 
 ## `aso rank`
 
@@ -316,6 +358,90 @@ that is live on the store. Run it every quarter. Apple has changed the group
 membership before.
 
 ---
+
+## App Store Connect
+
+These four commands need an API key that you make yourself, and the extra
+dependency:
+
+```bash
+pipx install 'aso-advisor[sync]'
+```
+
+Read [app-store-connect.md](app-store-connect.md) for the key, the security
+rules, and the errors that you will meet.
+
+### `aso auth`
+
+```bash
+aso auth            # what credentials the tool found
+aso auth --check    # the same, and one call to Apple to confirm them
+```
+
+With no credentials, the command prints the steps to make a key. It never
+prints the key itself.
+
+### `aso pull`
+
+Read the metadata of the store into the workspace.
+
+```bash
+aso pull                          # the live version
+aso pull --editable               # the version that you prepare
+aso pull --metadata-version 3.0   # write into a directory that you name
+aso pull --locale de-DE
+```
+
+The command keeps the `language:` notes and the `*_eng` back-translations of
+the directory. Run it before an audit.
+
+### `aso push`
+
+Send a version directory to App Store Connect.
+
+```bash
+aso push --dry-run
+aso push
+aso push --locale de-DE
+aso push --metadata-version 2.2 --force
+aso push --skip-audit
+```
+
+| Option | What it does |
+| --- | --- |
+| `--metadata-version` | The version to push. The default is the newest. |
+| `--dry-run` | Print the intended changes and send nothing. |
+| `--locale` | One locale only. |
+| `--force` | Allow a change to a version in WAITING_FOR_REVIEW. |
+| `--skip-audit` | Push even when the audit finds a CRITICAL problem. |
+| `--verbose` | Print the requests and the answers. |
+
+The field lengths are checked on your machine, and the audit runs, before the
+first request. One bad locale does not stop the others.
+
+### `aso push-assets`
+
+Upload the localized screenshots and the app preview videos. Only the sets
+that changed go up; App Store Connect keeps a checksum per asset.
+
+```bash
+aso push-assets --dry-run
+aso push-assets
+aso push-assets --only videos --locale de-DE
+aso push-assets --dir "~/design/Screenshots/Theme A" --videos-dir "~/design/Videos"
+aso push-assets --missing-only
+```
+
+| Option | What it does |
+| --- | --- |
+| `--metadata-version` | The version whose assets to upload. |
+| `--dir`, `--videos-dir` | Read a tree outside the workspace. |
+| `--only screenshots\|videos` | One family only. |
+| `--locale`, `--device` | One locale, or one device set. |
+| `--all-locales` | A flat external tree applies to every localization. |
+| `--missing-only` | Never replace what the store already holds. |
+| `--dry-run`, `--force`, `--verbose` | As above. |
+
 
 ## The helper commands
 

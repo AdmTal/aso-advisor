@@ -9,7 +9,18 @@ import sys
 import time
 from pathlib import Path
 
-from . import __version__, assets, db, live, loader, report, rules, scaffold, workspace
+from . import (
+    __version__,
+    assets,
+    db,
+    live,
+    loader,
+    phrases,
+    report,
+    rules,
+    scaffold,
+    workspace,
+)
 from .model import SEVERITIES
 from .workspace import WorkspaceError
 
@@ -20,12 +31,16 @@ EXIT_FINDINGS = 2
 EPILOG = """\
 examples:
   aso init --app-id 123456789     make a workspace from your live App Store page
+  aso auth                        check the App Store Connect key, or learn to make one
+  aso pull                        read the live metadata into the workspace
   aso audit                       audit the newest metadata version
   aso audit --fail-on high        the same, with an exit code for a build pipeline
+  aso phrases                     propose the target search phrases
   aso list                        the open suggestions
   aso dismiss S-1a2b3c4d "bet"    hide one suggestion and say why
   aso rank                        the real search position of your target phrases
-  aso discover                    keyword ideas from the App Store autocomplete
+  aso push --dry-run              show what a metadata push would change
+  aso push-assets                 upload the localized screenshots and videos
 
 documentation: https://github.com/AdmTal/aso-advisor/tree/main/docs
 """
@@ -397,6 +412,123 @@ def cmd_cache(args):
     return EXIT_OK
 
 
+def cmd_phrases(args):
+    ws = _load(args)
+    conn = db.connect(ws.db_path)
+    candidates, seeds = phrases.generate(
+        ws, conn, country=args.country, deep=args.deep, fresh=args.fresh,
+        with_reviews=args.with_reviews, limit=args.limit,
+        extra_roots=_split_list(args.roots))
+    conn.close()
+    phrases.print_report(candidates, seeds,
+                         group_label=ws.config.app.default_country.upper())
+    if args.write:
+        added, _block = phrases.write_phrases(ws, candidates, minimum_score=args.min_score)
+        if added:
+            print(f'\nAdded {len(added)} phrase(s) to {ws.strategy_path}:')
+            for phrase, score, _why in added:
+                print(f'  - {phrase} (score {score})')
+        else:
+            print(f'\nNothing new to add at score {args.min_score} or above.')
+    if args.write_seeds and seeds:
+        added, _block = phrases.write_seeds(ws, seeds)
+        if added:
+            print(f'\nAdded {len(added)} seed keyword(s) to {ws.strategy_path}:')
+            for term, score, _why in added:
+                print(f'  - {term} (score {score})')
+    if args.write or args.write_seeds:
+        print('\nRead the file, correct the scores, then run `aso audit`.')
+    return EXIT_OK
+
+
+# -- App Store Connect --------------------------------------------------------
+
+def cmd_auth(args):
+    from .asc import client as asc_client
+
+    ws = _load(args)
+    try:
+        creds = asc_client.Credentials.resolve(ws)
+    except asc_client.ASCAuthError as exc:
+        print(f'\n{exc}\n', file=sys.stderr)
+        return EXIT_ERROR
+    print('  key id      ' + creds.key_id)
+    print('  issuer id   ' + creds.issuer_id)
+    print('  key file    ' + (creds.key_path or 'from APP_STORE_CONNECT_PRIVATE_KEY'))
+    print('  app id      ' + creds.app_id)
+    if creds.key_path:
+        try:
+            inside = Path(creds.key_path).resolve().is_relative_to(ws.root.parent.resolve())
+        except AttributeError:                      # Python 3.8 and older
+            inside = str(ws.root.parent.resolve()) in str(Path(creds.key_path).resolve())
+        if inside:
+            print('\n  ⚠️  The key file is inside your project. Check that your '
+                  '.gitignore holds *.p8.')
+    if not args.check:
+        print('\nThe credentials are complete. Add --check to call the API and confirm '
+              'that Apple accepts them.')
+        return EXIT_OK
+    try:
+        app = asc_client.ASCClient(creds, verbose=args.verbose).whoami()
+    except (asc_client.ASCError, asc_client.ASCAuthError) as exc:
+        print(f'\nApple refused the credentials:\n{exc}\n', file=sys.stderr)
+        return EXIT_ERROR
+    print(f'\n✅ Apple accepted the key. The app is "{app.get("name", "?")}" '
+          f'({app.get("bundleId", "?")}).')
+    return EXIT_OK
+
+
+def cmd_pull(args):
+    from .asc import pull
+
+    ws = _load(args)
+    return pull.cmd_pull(ws, version=args.metadata_version, from_editable=args.editable,
+                         locale=args.locale, verbose=args.verbose)
+
+
+def cmd_push(args):
+    from .asc import push
+
+    ws = _load(args)
+    versions = loader.discover_versions(ws.versions_dir)
+    name, path = loader.select_version(versions, args.metadata_version)
+    print(f'Reading the metadata of version {name} from {path}')
+    raw = loader.load_version_raw(path)
+    if not raw:
+        print(f'No locale in {path}.', file=sys.stderr)
+        return EXIT_ERROR
+
+    if not args.skip_audit:
+        ctx, _path = _build_context(ws, name)
+        findings = [s for s in rules.run_all(ctx, disabled=ws.config.disabled_rules)
+                    if s.severity == 'CRITICAL']
+        if findings:
+            print('\nThe audit found problems that App Store Connect will refuse:',
+                  file=sys.stderr)
+            for item in findings:
+                print(f'  🟥 {item.title}', file=sys.stderr)
+            print('\nFix them, or use --skip-audit to push anyway.', file=sys.stderr)
+            return EXIT_FINDINGS
+    return push.cmd_push(ws, raw, dry_run=args.dry_run, only_locale=args.locale,
+                         force=args.force, verbose=args.verbose)
+
+
+def cmd_push_assets(args):
+    from .asc import media
+
+    ws = _load(args)
+    versions = loader.discover_versions(ws.versions_dir)
+    name, path = loader.select_version(versions, args.metadata_version)
+    if not args.dir:
+        print(f'Reading the assets of version {name} from {path / "assets"}')
+    return media.cmd_push_assets(
+        ws, assets_dir=path / 'assets', screenshots_dir=args.dir,
+        videos_dir=args.videos_dir, only=args.only, locale=args.locale,
+        device=args.device, all_locales=args.all_locales,
+        missing_only=args.missing_only, dry_run=args.dry_run, force=args.force,
+        verbose=args.verbose)
+
+
 def cmd_where(args):
     ws = _load(args)
     print(f'  workspace  {ws.root}')
@@ -513,6 +645,68 @@ def build_parser():
     p.add_argument('--fresh', action='store_true')
     p.set_defaults(func=cmd_verify_groups)
 
+    p = sub.add_parser('phrases', help='propose the target search phrases')
+    p.add_argument('--country', help='the storefront to read (default: the home one)')
+    p.add_argument('--roots', help='extra comma-separated root terms to expand')
+    p.add_argument('--deep', action='store_true',
+                   help='expand the best completion one more level')
+    p.add_argument('--with-reviews', action='store_true',
+                   help='also mine the words of your recent reviews')
+    p.add_argument('--limit', type=int, default=25, help='how many rows to print')
+    p.add_argument('--write', action='store_true',
+                   help='add the strong proposals to phrase_targets in strategy.yaml')
+    p.add_argument('--write-seeds', action='store_true',
+                   help='add the one-word proposals to seed_keywords')
+    p.add_argument('--min-score', type=int, default=6,
+                   help='the lowest score that --write accepts (default 6)')
+    p.add_argument('--fresh', action='store_true')
+    p.set_defaults(func=cmd_phrases)
+
+    p = sub.add_parser('auth', help='check the App Store Connect key, or learn to make one')
+    p.add_argument('--check', action='store_true',
+                   help='call the API and confirm that Apple accepts the key')
+    p.add_argument('--verbose', action='store_true')
+    p.set_defaults(func=cmd_auth)
+
+    p = sub.add_parser('pull', help='read the live metadata into the workspace')
+    p.add_argument('--metadata-version',
+                   help='the version directory to write (default: the store version)')
+    p.add_argument('--editable', action='store_true',
+                   help='read the version that you prepare, not the live one')
+    p.add_argument('--locale', help='read one locale only')
+    p.add_argument('--verbose', action='store_true')
+    p.set_defaults(func=cmd_pull)
+
+    p = sub.add_parser('push', help='send the metadata of a version to App Store Connect')
+    p.add_argument('--metadata-version', help='the version to push (default: the newest)')
+    p.add_argument('--dry-run', action='store_true',
+                   help='print the intended changes and send nothing')
+    p.add_argument('--locale', help='push one locale only')
+    p.add_argument('--force', action='store_true',
+                   help='allow a change to a version in WAITING_FOR_REVIEW')
+    p.add_argument('--skip-audit', action='store_true',
+                   help='push even when the audit finds a CRITICAL problem')
+    p.add_argument('--verbose', action='store_true')
+    p.set_defaults(func=cmd_push)
+
+    p = sub.add_parser('push-assets',
+                       help='upload the localized screenshots and preview videos')
+    p.add_argument('--metadata-version', help='the version to read (default: the newest)')
+    p.add_argument('--dir', help='read an external screenshot tree instead of the workspace')
+    p.add_argument('--videos-dir', help='read the preview videos from another tree')
+    p.add_argument('--only', choices=['screenshots', 'videos'], help='one family only')
+    p.add_argument('--locale', help='one locale only')
+    p.add_argument('--device', help='one device only, for example iphone-6.9 or ipad-13')
+    p.add_argument('--all-locales', action='store_true',
+                   help='a flat external tree applies to every localization of the version')
+    p.add_argument('--missing-only', action='store_true',
+                   help='upload only where the store has nothing yet')
+    p.add_argument('--dry-run', action='store_true')
+    p.add_argument('--force', action='store_true',
+                   help='allow a change to a version in WAITING_FOR_REVIEW')
+    p.add_argument('--verbose', action='store_true')
+    p.set_defaults(func=cmd_push_assets)
+
     p = sub.add_parser('lookup', help='read the public data of an app')
     p.add_argument('app', nargs='?', help='the numeric identifier or the App Store URL')
     p.add_argument('--bundle-id')
@@ -541,6 +735,10 @@ def main(argv=None):
     except (WorkspaceError, loader.MetadataError) as exc:
         print(f'\n{exc}\n', file=sys.stderr)
         return EXIT_ERROR
+    except SystemExit as exc:
+        if exc.code not in (None, 0):
+            print(f'\n{exc}\n', file=sys.stderr)
+        return exc.code if isinstance(exc.code, int) else EXIT_ERROR
     except BrokenPipeError:
         return EXIT_OK
     except KeyboardInterrupt:

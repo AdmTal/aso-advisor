@@ -2,17 +2,55 @@
 
 ## Does the tool change my app on the App Store?
 
-No. The advisor reads YAML files that you control, and it reads the public
-endpoints of Apple. It never writes to App Store Connect and it never needs
-your credentials. To publish, use `fastlane deliver`, the App Store Connect
-API, or the web interface.
+Only when you ask it to, and only with a key that you make yourself.
+
+The audit and the live commands never write. They read your files and the
+public endpoints of Apple.
+
+Three commands do write: `aso pull` (which writes files on your machine),
+`aso push` (which sends your metadata to App Store Connect), and
+`aso push-assets` (which uploads your screenshots and videos). Each one has a
+`--dry-run` option, and `aso push` refuses to start when the audit finds a
+CRITICAL problem. Read [app-store-connect.md](app-store-connect.md).
 
 ## Do I need an API key or an account?
 
-No. The live commands use three endpoints that anybody can call: the iTunes
-Search and Lookup API, the MZSearchHints autocomplete, and the customer reviews
-RSS feed. The only value that the tool needs is the numeric identifier of your
-App Store page, which is in the page URL.
+Not for the audit, and not for `rank`, `discover`, `competitors`, or
+`reviews`. Those use three endpoints that anybody can call: the iTunes Search
+and Lookup API, the MZSearchHints autocomplete, and the customer reviews RSS
+feed. The only value that the tool needs is the numeric identifier of your App
+Store page, which is in the page URL.
+
+You need an App Store Connect API key only for `pull`, `push`, and
+`push-assets`. Run `aso auth`; with no key, it prints the steps to make one.
+
+## Where do I put the .p8 key file?
+
+Outside your repository. `~/.appstoreconnect/keys/` is a good place. Then give
+the tool the path with the environment variable
+`APP_STORE_CONNECT_PRIVATE_KEY_PATH`, with a `.env` file in the workspace, or
+with `asc.private_key_path` in `aso.yaml`.
+
+Apple lets you download a `.p8` file one time only. If you lose it, revoke the
+key in App Store Connect and make a new one. In a build pipeline, put the
+content of the key in the secret `APP_STORE_CONNECT_PRIVATE_KEY`, so the file
+never touches the disk of the runner.
+
+## Can it replace fastlane deliver?
+
+For metadata, screenshots, and app previews, yes. `aso pull`, `aso push`, and
+`aso push-assets` cover that ground, and the workspace adds the audit, the
+suggestion history, and the strategy file.
+
+For everything else that fastlane does — certificates, builds, TestFlight,
+release — keep fastlane. The two tools live together without trouble.
+
+## How do I get target phrases if I have none?
+
+Run `aso phrases`. It expands your seeds through the App Store autocomplete,
+adds the word groups of your competitors' titles, and scores each candidate
+against the metadata that you have. `aso phrases --write` puts the strong ones
+into `strategy.yaml`. See [keyword-research.md](keyword-research.md).
 
 ## Is it safe to run the live commands often?
 
@@ -26,9 +64,13 @@ to empty the cache.
 
 ## Where does my data go?
 
-Nowhere. Your metadata stays in your repository. The database stays in your
-workspace. The only network requests are the live commands, and they only send
-a search term and a country code to Apple.
+To Apple, or nowhere.
+
+Your metadata stays in your repository, and the database stays in your
+workspace. The live commands send a search term and a country code to the
+public endpoints of Apple. The push commands send your own metadata and your
+own assets to App Store Connect, which is where they belong. Nothing goes
+anywhere else, and the tool has no server.
 
 ## Does the tool know search volume?
 
@@ -137,9 +179,15 @@ Run it when you change metadata, and one time each week with `aso rank` and
 `aso competitors`. More often gives nothing: a keyword change needs about two
 weeks before the position means anything.
 
-## Why Python, and why only one dependency?
+## Why Python, and why almost no dependencies?
 
 A metadata tool must still run in three years, in a repository that nobody
-touched. One dependency (PyYAML) and the standard library make that likely.
-`pipx install aso-advisor` also keeps it out of the environment of your
+touched. The tool needs PyYAML and nothing else. The HTTP, the image and video
+readers, and the database all come from the standard library.
+
+The App Store Connect commands add one package, PyJWT, because Apple wants a
+signed ES256 token. It is an extra, so a user who only wants the audit never
+installs it: `pip install 'aso-advisor[sync]'`.
+
+`pipx install aso-advisor` also keeps the tool out of the environment of your
 project.

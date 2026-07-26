@@ -25,18 +25,28 @@ decision.
 
 ```bash
 aso init --app-id 123456789
-# put your live metadata into aso/versions/<version>/
+aso auth                 # make an App Store Connect key, then:
+aso pull                 # the live metadata, straight into the workspace
 aso audit
 ```
+
+Without a key, put the metadata into `aso/versions/<version>/` by hand. The
+audit needs no key.
 
 Fix everything that is CRITICAL and HIGH. Most of them are pure waste:
 duplicates, spaces, and empty fields. You do not need a strategy for this part.
 
 **Day 2 — write the strategy.**
 
-Open `aso/strategy.yaml`. Write `brand_phrases`, five to ten `seed_keywords`,
-and five `phrase_targets`. Run `aso audit` again. The list is now about your
-positioning.
+Open `aso/strategy.yaml`. Write `brand_phrases` and five to ten
+`seed_keywords`. For the phrases, ask the store instead of guessing:
+
+```bash
+aso phrases --write
+$EDITOR aso/strategy.yaml    # correct the scores, remove the wrong audience
+```
+
+Run `aso audit` again. The list is now about your positioning.
 
 **Day 3 — ask the store.**
 
@@ -61,8 +71,13 @@ it with the reason. A short list is a list that you read.
 
 **Day 5 — publish and close the loop.**
 
-Push the metadata with your normal process, then run `aso audit`. The fixed
-items resolve by themselves, and `aso rank` starts its history.
+```bash
+aso push --dry-run       # read what would change
+aso push                 # publish the text
+aso push-assets          # publish the screenshots and the videos
+aso audit                # the fixed items resolve by themselves
+aso rank                 # the history starts here
+```
 
 ---
 
@@ -72,11 +87,13 @@ Run this before every metadata push. It takes two minutes and it catches the
 failures that App Store Connect finds an hour later.
 
 ```bash
+aso pull                                    # start from what is really live
 cp -r aso/versions/2.1 aso/versions/2.2     # never edit a version that is live
 # edit aso/versions/2.2/
 aso audit --metadata-version 2.2
 aso diff --old 2.1 --new 2.2                # read the change out loud
 aso assets --metadata-version 2.2           # sizes, alpha, counts, order
+aso push --dry-run --metadata-version 2.2   # the exact requests that would go
 ```
 
 Three questions before you push:
@@ -86,8 +103,18 @@ Three questions before you push:
 3. Did a fix create a new problem? A new word in a title often creates a new
    `DUP_TITLE` in a keyword field.
 
+Then publish:
+
+```bash
+aso push --metadata-version 2.2
+aso push-assets --metadata-version 2.2
+```
+
 After the push, run `aso audit` one more time on the new version. That run is
 the record: it resolves what you fixed, and the DIFF note documents the push.
+
+`aso push` refuses to start when the audit finds a CRITICAL problem, so a field
+that is too long fails on your machine and not in App Store Connect.
 
 ---
 
@@ -123,23 +150,31 @@ that message is the only record of why the keyword field changed.
 
 Half a day, twice a year, or after a large feature.
 
-**Step 1 — collect the raw words.**
+**Step 1 — ask the store for the phrases.**
 
 ```bash
-aso discover --deep > /tmp/ideas.txt
-aso discover --country gb --deep >> /tmp/ideas.txt
-aso reviews --pages 5 >> /tmp/ideas.txt
+aso phrases --deep --with-reviews --limit 40
 ```
 
-`discover` gives the queries that users type, in the popularity order of Apple.
-`reviews` gives the words that your own users write. The two lists rarely
-match, and the difference is the interesting part.
+The command expands your roots through the autocomplete, adds the word groups
+of your competitors' titles, and scores each candidate against the metadata
+that you have today. For the raw material behind it:
 
-**Step 2 — score them by hand.**
+```bash
+aso discover --deep              # every completion, with the GAP marker
+aso reviews --pages 5            # the words that your users write
+```
 
-Put the good ones into `strategy.yaml` as `seed_keywords` with your own score,
-and the good queries as `phrase_targets`. Write the `why` text. Your future
-self needs it.
+**Step 2 — keep the good ones.**
+
+```bash
+aso phrases --write --min-score 7
+aso phrases --write-seeds
+$EDITOR aso/strategy.yaml
+```
+
+Correct the scores by hand and write the `why` text. Your future self needs
+it. [keyword-research.md](keyword-research.md) explains the scoring.
 
 **Step 3 — let the tool do the arithmetic.**
 
@@ -161,7 +196,11 @@ Read the proposal. It is a start, not an answer.
 
 **Step 4 — measure.**
 
-Push, wait two weeks, then run `aso rank`. Two weeks is the minimum. A keyword
+```bash
+aso push --dry-run && aso push
+```
+
+Wait two weeks, then run `aso rank`. Two weeks is the minimum. A keyword
 change needs time to enter the index and more time to collect the behaviour
 signals that decide the position.
 

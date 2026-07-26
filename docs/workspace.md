@@ -247,6 +247,9 @@ notes:
 
 ## Metadata YAML
 
+`aso pull` writes these files for you, and `aso push` sends them back. You can
+also write them by hand, or generate them from another tool.
+
 Each version directory holds one or more YAML files. The loader reads every
 `*.yaml` and `*.yml` file and merges the `locales:` block of each one. A file
 without a `locales:` block is ignored, so you can keep your own notes in the
@@ -382,7 +385,15 @@ it never opens the network. It reports:
 ```bash
 aso assets                       # the tree and the findings, alone
 aso audit --no-assets            # skip the asset rules in an audit
+aso push-assets --dry-run        # what an upload would change
+aso push-assets                  # upload the sets that changed
 ```
+
+`aso push-assets` uploads this tree to App Store Connect. It compares the
+checksum of each file with the checksum that the store holds, so it uploads
+only the sets that changed. It can also read a tree that lives outside the
+workspace, for example the export folder of a design tool. See
+[app-store-connect.md](app-store-connect.md).
 
 Screenshot captions are indexed text. Write real search phrases in them, not
 slogans. See [concepts.md](concepts.md).
@@ -412,9 +423,11 @@ your dismissals are gone. Keep it on your machine. It holds no credentials.
 **Do not commit:**
 
 - `reports/`;
-- `state/`.
+- `state/`;
+- `.env`;
+- any `*.p8` file. An App Store Connect key must never enter version control.
 
-`aso init` writes an `.gitignore` in the workspace with both entries.
+`aso init` writes an `.gitignore` in the workspace with all four entries.
 
 The screenshots make the repository larger. If that is a problem, use
 [Git LFS](https://git-lfs.com/) for `aso/versions/**/assets/**`, or keep the

@@ -15,6 +15,7 @@ from pathlib import Path
 
 import yaml
 
+from . import yamlio
 from .model import LocaleMeta
 
 FIELD_ALIASES = {
@@ -71,7 +72,7 @@ def load_version(path):
     locales = {}
     for file in files:
         try:
-            data = yaml.safe_load(file.read_text(encoding='utf-8')) or {}
+            data = yamlio.load(file.read_text(encoding='utf-8')) or {}
         except yaml.YAMLError as exc:
             raise MetadataError(f'{file} is not valid YAML:\n{exc}') from exc
         block = data.get('locales')
@@ -96,6 +97,36 @@ def load_version(path):
             'Every metadata file needs a top-level `locales:` key. '
             'See docs/workspace.md.')
     return locales
+
+
+def load_version_raw(path):
+    """Load a version directory as plain dictionaries: {locale: {field: value}}.
+
+    `load_version` returns `LocaleMeta` objects for the audit, which hold only
+    the fields that the rules read. The push and pull commands need every
+    field, the URLs included, so they use this function. Notes for the reader
+    (`language:` and every `*_eng` field) are removed.
+    """
+    path = Path(path)
+    files = metadata_files(path)
+    if not files:
+        raise MetadataError(f'No YAML metadata file in {path}.')
+    out = {}
+    for file in files:
+        try:
+            data = yamlio.load(file.read_text(encoding='utf-8')) or {}
+        except yaml.YAMLError as exc:
+            raise MetadataError(f'{file} is not valid YAML:\n{exc}') from exc
+        block = data.get('locales')
+        if not isinstance(block, dict):
+            continue
+        for code, fields in block.items():
+            if not isinstance(fields, dict):
+                raise MetadataError(f'{file}: locale {code!r} must hold a block of fields.')
+            clean = {k: v for k, v in fields.items()
+                     if k != 'language' and not str(k).endswith('_eng')}
+            out.setdefault(code, {}).update(clean)
+    return out
 
 
 def select_version(versions, wanted=None):
