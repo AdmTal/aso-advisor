@@ -1,0 +1,38 @@
+# Example workspace — "Trailwise", an app that does not exist.
+#
+# The numbers and the words here are made up. Use this workspace to see what
+# the advisor does before you write your own:
+#
+#   aso --workspace examples/trailwise audit --no-state --no-report
+#
+# The example has real problems in it on purpose. The audit finds them.
+version: 1
+
+app:
+  name: Trailwise
+  bundle_id: com.example.trailwise
+  # A made-up identifier. The live commands (rank, competitors, reviews) need a
+  # real one, so they do not work in this example.
+  track_id: 0
+  primary_locale: en-US
+  default_country: us
+
+markets:
+  rank_countries: [us, gb, de]
+  review_countries: [us, gb]
+  # Audit only the storefronts that matter to this app. Remove the list to
+  # audit every storefront that has metadata.
+  storefront_groups: [US, GB, AU, CA, DE, JP]
+
+assets:
+  check: true
+  check_dimensions: true
+  check_video_duration: true
+  max_screenshots: 10
+  max_previews: 3
+  required_locales: [en-US, de-DE]
+
+audit:
+  disable_rules: []
+
+cache_hours: 12

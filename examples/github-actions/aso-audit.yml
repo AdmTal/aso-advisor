@@ -1,0 +1,70 @@
+# A build-pipeline guard for your app metadata.
+#
+# Copy this file to .github/workflows/aso-audit.yml in the repository of your
+# app. The first job fails the pull request when a field breaks a hard limit of
+# App Store Connect. The second job writes the report into the pull request as
+# a comment, so the reviewer reads the effect of the change.
+#
+# Change `aso/**` below if your workspace has another path.
+
+name: ASO audit
+
+on:
+  pull_request:
+    paths:
+      - 'aso/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  audit:
+    name: Audit the metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install the ASO Advisor
+        run: pip install aso-advisor
+
+      # Exit code 2 means: a suggestion at CRITICAL or above. A field that is
+      # too long fails here, and not one hour later in App Store Connect.
+      # Move the level to "high" when your list is clean.
+      - name: Check the hard limits
+        run: aso audit --fail-on critical --no-state --no-report
+
+      # The state belongs to a person, not to a runner, so the report goes to
+      # stdout and into the job summary.
+      - name: Write the report into the job summary
+        if: always()
+        run: |
+          aso audit --no-state --no-report >> "$GITHUB_STEP_SUMMARY" 2>&1 || true
+
+      - name: Comment on the pull request
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { execSync } = require('child_process');
+            let body;
+            try {
+              body = execSync('aso audit --no-state --no-report', { encoding: 'utf8' });
+            } catch (error) {
+              body = (error.stdout || '') + (error.stderr || '');
+            }
+            const marker = '<!-- aso-advisor -->';
+            const text = `${marker}\n### ASO audit\n\n\`\`\`\n${body.trim()}\n\`\`\``;
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.rest.issues.listComments({ owner, repo, issue_number });
+            const mine = comments.data.find(c => c.body && c.body.includes(marker));
+            if (mine) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body: text });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body: text });
+            }

@@ -1,0 +1,52 @@
+# Version 2.1 — the current metadata.
+#
+# Limits: name 30, subtitle 30, keywords 100 characters.
+# The keyword field holds single words, separated by commas, with no spaces.
+#
+# This file has real problems in it, so that the audit has something to find.
+# Run `aso --workspace examples/trailwise audit` and read the action list.
+
+locales:
+  en-US:
+    language: English (United States)
+    name: 'Trailwise: Hike & Trail GPS'
+    subtitle: Offline Maps for Backpacking
+    keywords: |-
+      map,elevation,tracker,route,walk,trek,compass,summit,waypoint,park
+    promotional_text: >-
+      New in 2.1: download a whole national park for offline use, then follow
+      the trail with live elevation. No account needed.
+  en-GB:
+    language: English (United Kingdom)
+    name: 'Trailwise: Walking Routes'
+    subtitle: Footpath Maps & Hill Walks
+    keywords: |-
+      path,paths,ramble,moor,coast,fell,countryside,free,ordnance,trig
+  es-MX:
+    language: Spanish (Mexico)
+    name: 'Trailwise: Rutas y Mapas'
+    name_eng: 'Trailwise: Routes and Maps'
+    subtitle: Senderismo y GPS sin Internet
+    subtitle_eng: Hiking and GPS without Internet
+    # This keyword field is in English on purpose. See the note
+    # "es-mx-english-slot" in strategy.yaml.
+    keywords: |-
+      hiking,trailhead,navigation,altimeter,wilderness,mountain,forest,trail
+  de-DE:
+    language: German
+    name: 'Trailwise: Wandern & Karten'
+    name_eng: 'Trailwise: Hiking and Maps'
+    subtitle: Offline Wanderkarten & GPS
+    subtitle_eng: Offline Hiking Maps and GPS
+    keywords: |-
+      route,berg,gipfel,kompass,hoehenmeter,tour,pfad,steig,alpen,gpx,huette
+    keywords_eng: |-
+      route,mountain,summit,compass,elevation,tour,path,trail,alps,gpx,hut
+  ja:
+    language: Japanese
+    name: 'Trailwise: 登山地図とGPS'
+    name_eng: 'Trailwise: Mountain Maps and GPS'
+    subtitle: オフライン登山ナビ
+    subtitle_eng: Offline Mountain Navigation
+    keywords: |-
+      ハイキング,トレイル,山,地図,オフライン,コンパス,標高,ルート,散歩,縦走

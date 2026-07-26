@@ -1,0 +1,54 @@
+# Descriptions, promotional text, and release notes.
+#
+# The description does not feed keyword rank. It feeds the discovery tags of
+# Apple and the assistants that recommend apps, so the first paragraph must say
+# plainly what the app does.
+#
+# The German text below is shorter than the English text on purpose. The
+# DESC_DEPTH rule finds it.
+
+locales:
+  en-US:
+    language: English (United States)
+    description: |-
+      Trailwise is an offline hike tracker. Download the map of a trail before
+      you leave, then follow your route with GPS, a compass, and live elevation
+      while your phone has no signal.
+
+      Plan the route at home. Search a trail by name, look at the elevation
+      profile, and save the map to your phone. The download holds the whole
+      area, not one line on a map.
+
+      Walk with confidence. The app records your track, shows the distance to
+      the next waypoint, and warns you when you leave the path.
+
+      Come back with the story. Every hike keeps its photos, its elevation
+      gain, and its moving time, and you can export the track as GPX.
+
+      • Offline maps for the whole park, not one route
+      • Live elevation profile and total gain
+      • Compass and waypoint navigation with no signal
+      • GPX import and export
+      • Photos attached to the point where you took them
+    promotional_text: >-
+      New in 2.1: download a whole national park for offline use, then follow
+      the trail with live elevation. No account needed.
+    whats_new: |-
+      2.1 adds park-wide offline downloads. The elevation profile now shows the
+      grade of the next kilometre, and GPX export keeps your photo points.
+  de-DE:
+    language: German
+    description: |-
+      Trailwise ist ein Wander-Tracker für unterwegs. Lade die Karte vorher
+      herunter und folge deiner Route mit GPS, Kompass und Höhenprofil, auch
+      ohne Empfang.
+
+      Plane die Tour zu Hause und speichere die Karte auf dem Telefon.
+    description_eng: |-
+      Trailwise is a hike tracker for the outdoors. Download the map first and
+      follow your route with GPS, compass, and elevation profile, even without
+      signal.
+
+      Plan the tour at home and save the map to the phone.
+    whats_new: Neue Karten.
+    whats_new_eng: New maps.

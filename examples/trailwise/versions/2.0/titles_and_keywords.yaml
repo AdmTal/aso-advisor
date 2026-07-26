@@ -1,0 +1,40 @@
+# Version 2.0 — the metadata that was live before 2.1.
+# Keep the old versions. `aso diff` and the DIFF rule read them.
+
+locales:
+  en-US:
+    language: English (United States)
+    name: 'Trailwise: Hike Tracker'
+    subtitle: Trail Maps and GPS Routes
+    keywords: |-
+      hike,trail,gps,map,walk,route,compass,summit,camping,park,outdoor,nature
+  en-GB:
+    language: English (United Kingdom)
+    name: 'Trailwise: Walk Tracker'
+    subtitle: Footpath Maps and Routes
+    keywords: |-
+      hiking,walking,ramble,path,ordnance,moor,coast,hill,fell,countryside,free
+  es-MX:
+    language: Spanish (Mexico)
+    name: 'Trailwise: Rutas y Mapas'
+    name_eng: 'Trailwise: Routes and Maps'
+    subtitle: Senderismo y GPS sin Internet
+    subtitle_eng: Hiking and GPS without Internet
+    keywords: |-
+      trail,offline,elevation,backpacking,trek,waypoint,altimeter,navigation
+  de-DE:
+    language: German
+    name: 'Trailwise: Wandern & Karten'
+    name_eng: 'Trailwise: Hiking and Maps'
+    subtitle: Offline Wanderkarten & GPS
+    subtitle_eng: Offline Hiking Maps and GPS
+    keywords: |-
+      wandern,wanderungen,route,berg,gipfel,kompass,hoehenmeter,tour,pfad,natur
+  ja:
+    language: Japanese
+    name: 'Trailwise: 登山地図とGPS'
+    name_eng: 'Trailwise: Mountain Maps and GPS'
+    subtitle: オフライン登山ナビ
+    subtitle_eng: Offline Mountain Navigation
+    keywords: |-
+      ハイキング,トレイル,山,地図,オフライン,コンパス,標高,ルート,散歩

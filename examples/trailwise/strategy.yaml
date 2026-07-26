@@ -1,0 +1,108 @@
+# Example strategy for "Trailwise", an app that does not exist.
+#
+# Read this file as a model for your own. Each score is the value of the term
+# for this app, from 0 to 10. A score is not search volume.
+
+brand_phrases:
+  - trailwise
+
+seed_keywords:
+  - term: hike
+    score: 9
+    why: The main category word. Users type it alone and inside phrases.
+  - term: trail
+    score: 9
+    why: The second category word. It also completes "trail map" and "trail gps".
+  - term: offline
+    score: 8
+    why: The main reason that users choose this app over the maps of the phone.
+  - term: map
+    score: 8
+    why: Needed in the same localization as "offline", or the phrase cannot form.
+  - term: gps
+    score: 7
+    why: High intent. Users who type it want live tracking.
+  - term: compass
+    score: 6
+    why: A feature that users search for by name.
+  - term: elevation
+    score: 6
+    why: Completes "elevation profile" and "elevation gain".
+  - term: trek
+    score: 5
+    why: The word that users outside North America use for a long hike.
+  - term: backpacking
+    score: 5
+    why: The multi-day audience. It converts better than the day-hike audience.
+  - term: summit
+    score: 4
+    why: The peak-bagging audience.
+  - term: walk
+    score: 4
+    why: A soft entry word for the users who do not call themselves hikers.
+  - term: planner
+    score: 6
+    why: Completes "route planner". No localization indexes it today.
+  - term: walking
+    score: 5
+    why: The form that users type. The keyword field only has "walk".
+  - term: gpx
+    score: 4
+    why: The file format. The users who search for it already have other apps.
+
+phrase_targets:
+  - phrase: offline hiking maps
+    score: 9
+  - phrase: hiking trail gps
+    score: 8
+  - phrase: hike tracker with elevation
+    score: 7
+  - phrase: trail map offline
+    score: 7
+  - phrase: backpacking route planner
+    score: 6
+  - phrase: walking route tracker
+    score: 5
+
+phrase_stopwords: [with, and, on, for, the, a, an, of, to, in, my, your, no, by]
+
+low_value_terms: [app, apps, free, best, top, new, ios, iphone, ipad, download, apple]
+
+trademark_terms: [alltrails, komoot, gaia, strava]
+soft_trademark_terms: []
+
+ai_tag_terms: [hike, trail, map, offline, gps, elevation]
+
+# A made-up list. To find the real identifiers of your competitors, run:
+#   aso competitors --suggest "hiking gps"
+competitors: []
+
+discovery_seeds:
+  - hiking
+  - hiking maps
+  - trail map
+  - offline maps
+  - gps tracker
+  - walking
+
+local_discovery_seeds:
+  de: [wandern, wanderkarte, offline karte, gps wandern]
+
+locale_priority:
+  fr-FR: France — a large hiking market with strong local competition
+  it: Italy — the Alps audience, and the translation is cheap
+
+notes:
+  - key: es-mx-english-slot
+    title: es-MX carries English keywords for the United States storefront
+    detail: >
+      The United States storefront indexes en-US, es-MX, ru, ar-SA, and vi
+      together. This workspace uses the es-MX keyword field for extra English
+      terms, because the app sells mostly in the United States. The cost is
+      real: the Mexican storefront indexes no Spanish word, so Mexico cannot
+      find the app in its own language. Revisit this trade-off when Mexico
+      revenue matters.
+
+probe:
+  anchor: hiking maps
+  controls: [dentist, sudoku]
