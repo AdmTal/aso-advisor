@@ -319,6 +319,95 @@ that explains a rank change.
 
 ---
 
+## In-app purchases
+
+The display name of an in-app purchase is 30 characters that the store
+indexes, and the description adds 45 more. Five products are 375 characters of
+keyword surface that most apps never use, and that no user reads as metadata.
+
+Declare the products in the version YAML, and these rules check them:
+
+```yaml
+in_app_purchases:
+  - product_id: com.example.pro
+    locales:
+      en-US:
+        name: Offline Park Packs
+        description: Download a park and walk with no signal.
+```
+
+### `IAP_LIMIT` — 🟥 CRITICAL
+
+A name is longer than 30 characters, or a description is longer than 45.
+App Store Connect refuses it.
+
+### `IAP_DUP` — 🟨 MEDIUM
+
+Every word of an in-app purchase name is already in the title, the subtitle, or
+the keyword field of the same locale.
+
+**Why.** The store indexes the name, so a name that only repeats your own words
+spends 30 indexed characters on nothing.
+
+**Fix.** Rename the product with a word that you index nowhere. The name must
+still say plainly what the user buys.
+
+### `IAP_LOCALE` — ⬜ LOW
+
+A product is localized in fewer locales than the app.
+
+**Why.** Those storefronts index no word from the product, and the users there
+read the name in a language that is not theirs before they pay.
+
+### `IAP_SEED` — ⬜ LOW
+
+You have products, and a seed keyword with a score of 6 or more that no
+localization indexes.
+
+**Fix.** Work the word into a product name, if the name still says plainly what
+the user buys.
+
+---
+
+## Screenshot captions
+
+The store indexes the text in a screenshot caption, and no tool can read the
+text inside an image. Write the captions in `assets/captions.yaml` and the
+audit can check them:
+
+```yaml
+locales:
+  en-US:
+    - Offline maps for the whole park
+    - See every metre of climb before you go
+```
+
+The rules stay quiet until that file exists. They are a feature that you switch
+on.
+
+### `CAPTION_KEYWORDS` — 🟨 MEDIUM
+
+No caption of a locale holds a word of your target phrases.
+
+**Why.** Caption text is indexed. "Beautiful design" spends indexed characters
+on nothing, and it tells the user nothing either.
+
+### `CAPTION_MISSING` — ⬜ LOW
+
+The caption file exists, but a required locale is not in it.
+
+### `CAPTION_LONG` — ⬜ LOW
+
+A caption is longer than 60 characters. A user reads a screenshot in about one
+second.
+
+### `CAPTION_COUNT` — ⬜ LOW
+
+The number of captions and the number of screenshots do not match.
+
+
+---
+
 ## Assets
 
 These rules read the file headers of the assets of the version. They use the

@@ -3,6 +3,49 @@
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [semantic versioning](https://semver.org/).
 
+## [1.2.0] — 2026-07-26
+
+Quality of life: the tool now protects your work, shows what a push really
+changes, and audits two kinds of indexed text that no other tool looks at.
+
+### Added
+
+- **`aso pull --check`.** It writes nothing, prints the differences between the
+  workspace and the store field by field, and returns exit code 2 on a
+  difference. It is the weekly job that finds an edit that somebody made in the
+  web interface.
+- **`aso status`.** One screen: the newest version, the work that nobody
+  pushed, the open findings by severity, the last rank movement, the cache, the
+  key, and the next steps. `--online` adds the live version and a drift count.
+- **`aso import --fastlane`.** It converts a `fastlane deliver` metadata tree
+  into a version of the workspace, with the `default/` fallback that fastlane
+  uses.
+- **In-app purchase rules.** Declare `in_app_purchases:` in a version and the
+  audit checks the 30-character names and the 45-character descriptions, finds
+  a name that only repeats words that you already index, reports the locales
+  with no translation, and proposes a keyword that a product name could carry.
+- **Screenshot caption rules.** Write `assets/captions.yaml` and the audit
+  checks that the captions hold words of your target phrases, that they are
+  short enough to read, and that their number matches the screenshots. The
+  rules stay quiet until the file exists.
+- **A real difference in `aso push --dry-run`**, with the old value and the new
+  value of every field. A locale that already matches is skipped, so a repeated
+  push sends nothing.
+- **A backup before every push.** The values of the store go into
+  `state/backups/<timestamp>-before-push/`. `--no-backup` switches it off.
+- `aso audit --locale de-DE` to show the findings of one market.
+- `aso rank --terms "a,b"` for a check without editing the strategy file,
+  `aso rank --history [TERM]` for the stored series, and `aso rank --csv PATH`
+  to export everything for a graph.
+- Colour in the terminal output, with `NO_COLOR` and `FORCE_COLOR` respected.
+
+### Changed
+
+- **`aso pull` no longer overwrites a draft.** The tool remembers the values of
+  the last pull and the last push, so it applies a change that came from the
+  store and it stops when the workspace holds work that nobody sent. `--force`
+  overwrites.
+
 ## [1.1.0] — 2026-07-26
 
 The workspace is no longer read-only, and the tool now proposes the target
@@ -81,5 +124,6 @@ The first public release. The tool grew inside the metadata repository of
 - **An example workspace** for an app that does not exist, with real problems
   in it.
 
+[1.2.0]: https://github.com/AdmTal/aso-advisor/releases/tag/v1.2.0
 [1.1.0]: https://github.com/AdmTal/aso-advisor/releases/tag/v1.1.0
 [1.0.0]: https://github.com/AdmTal/aso-advisor/releases/tag/v1.0.0

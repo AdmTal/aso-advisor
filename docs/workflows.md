@@ -124,10 +124,16 @@ Fifteen minutes, once a week. It is the loop that finds a change before it
 becomes a problem.
 
 ```bash
+aso status          # where do we stand?
+aso pull --check    # did anybody edit the metadata in the web interface?
 aso rank            # did we move?
 aso competitors     # did they move?
 aso reviews         # what do users say and what words do they use?
 ```
+
+`aso pull --check` returns exit code 2 on a difference, so it also works as a
+job that mails you only when something moved. Nothing else in the tool can
+find an edit that a teammate made outside the repository.
 
 Read the output in that order and ask:
 

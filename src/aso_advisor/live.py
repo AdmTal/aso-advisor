@@ -68,15 +68,15 @@ def _ttl(ws, fresh):
 
 # -- rank ---------------------------------------------------------------------
 
-def cmd_rank(ws, conn, countries=None, top=100, fresh=False):
+def cmd_rank(ws, conn, countries=None, top=100, fresh=False, terms=None):
     track_id = ws.require_track_id()
     ttl = _ttl(ws, fresh)
     countries = countries or ws.config.rank_countries
-    terms = list(dict.fromkeys(
+    terms = list(dict.fromkeys(terms)) if terms else list(dict.fromkeys(
         list(ws.strategy.brand_phrases) + [p for p, _s, _w in ws.strategy.phrase_targets]))
     if not terms:
         print('No terms to check. Add `brand_phrases` or `phrase_targets` to '
-              f'{ws.strategy_path}.')
+              f'{ws.strategy_path}, use `--terms "a,b"`, or run `aso phrases`.')
         return
 
     print(f'{len(terms)} term(s) × {len(countries)} storefront(s), top {top} results each. '
@@ -109,6 +109,68 @@ def cmd_rank(ws, conn, countries=None, top=100, fresh=False):
         print(f'  -> in the top {top} for {found}/{len(rows)} terms\n')
     print('The history is stored. The next `aso rank` shows the movement, and the audit\n'
           'report holds the last snapshot.')
+
+
+# -- rank history -------------------------------------------------------------
+
+def cmd_rank_history(ws, conn, term=None, csv_path=None, limit=40):
+    """Print the series of one term, or write the whole history to a CSV file."""
+    if csv_path:
+        return _write_rank_csv(conn, csv_path)
+
+    if term:
+        rows = conn.execute(
+            'SELECT ts, term, country, rank, scanned FROM rank_checks '
+            'WHERE term = ? ORDER BY country, id', (term,)).fetchall()
+        if not rows:
+            known = [r['term'] for r in conn.execute(
+                'SELECT DISTINCT term FROM rank_checks ORDER BY term').fetchall()]
+            print(f'No check for {term!r} yet.')
+            if known:
+                print('The history holds: ' + ', '.join(known))
+            return 0
+        print(f'== {term} ==\n')
+        print(f'  {"country":<8} {"when":<22} {"rank":>6}  scanned')
+        for row in rows:
+            shown = f'#{row["rank"]}' if row['rank'] else '—'
+            print(f'  {row["country"].upper():<8} {row["ts"]:<22} {shown:>6}  '
+                  f'{row["scanned"]}')
+        print('\nA dash means: not in the results that the check read.')
+        return 0
+
+    rows = db.rank_summary(conn, limit_terms=limit)
+    if not rows:
+        print('No rank check yet. Run `aso rank`.')
+        return 0
+    print(f'  {"term":<36} {"country":<8} {"rank":>6} {"before":>7}  when')
+    for row in rows:
+        current = f'#{row["rank"]}' if row['rank'] else '—'
+        before = f'#{row["prev"]}' if row['prev'] else '—'
+        print(f'  {row["term"]:<36} {row["country"].upper():<8} {current:>6} '
+              f'{before:>7}  {row["ts"][:10]}')
+    print('\nUse `aso rank --history "a phrase"` for one series, or '
+          '`aso rank --csv ranks.csv` for everything.')
+    return 0
+
+
+def _write_rank_csv(conn, csv_path):
+    import csv
+    from pathlib import Path
+
+    rows = conn.execute('SELECT ts, term, country, rank, scanned FROM rank_checks '
+                        'ORDER BY id').fetchall()
+    path = Path(csv_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, 'w', newline='', encoding='utf-8') as handle:
+        writer = csv.writer(handle)
+        writer.writerow(['timestamp', 'term', 'country', 'rank', 'scanned'])
+        for row in rows:
+            writer.writerow([row['ts'], row['term'], row['country'],
+                             row['rank'] if row['rank'] is not None else '',
+                             row['scanned']])
+    print(f'{len(rows)} row(s) written to {path}')
+    print('An empty rank means: not in the results that the check read.')
+    return 0
 
 
 # -- competitors --------------------------------------------------------------

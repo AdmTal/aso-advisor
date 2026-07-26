@@ -3,18 +3,29 @@
 The command works locale by locale. One bad locale does not stop the others,
 and the exit code is not zero when any locale failed.
 
-Two guards run before the first request:
+Four things happen before the first change:
 
 - Field lengths are checked on your machine. A field that is too long stops
   the push, and the message names the locale and the field.
 - The audit runs, and a CRITICAL finding stops the push. Use `--skip-audit` if
   you disagree.
+- The tool reads the values that the store holds now, and prints the exact
+  difference. A locale with no difference is skipped, so a repeated push sends
+  nothing.
+- The values of the store go into a backup directory, so you can put them back
+  if a push was wrong.
 """
 
 import sys
+import time
+from pathlib import Path
 
+from .. import compare, db, writer
+from ..color import paint
 from .client import (
+    APP_INFO_ASC_TO_YAML,
     APP_INFO_LOCALIZATION_FIELDS,
+    VERSION_ASC_TO_YAML,
     VERSION_LOCALIZATION_FIELDS,
     ASCClient,
     ASCError,
@@ -28,6 +39,22 @@ from .client import (
     validate_locale_fields,
 )
 
+PUSHABLE_FIELDS = set(VERSION_LOCALIZATION_FIELDS) | set(APP_INFO_LOCALIZATION_FIELDS)
+
+
+def remote_view(version_locales, info_locales):
+    """The current values of the store, in the shape of the YAML files."""
+    out = {}
+    for source, mapping in ((version_locales, VERSION_ASC_TO_YAML),
+                            (info_locales, APP_INFO_ASC_TO_YAML)):
+        for code, item in source.items():
+            attributes = item.get('attributes', {})
+            fields = out.setdefault(code, {})
+            for asc_key, yaml_key in mapping.items():
+                if attributes.get(asc_key) is not None:
+                    fields[yaml_key] = attributes[asc_key]
+    return out
+
 
 def _is_duplicate_locale(error):
     return error.status == 409 and any(
@@ -39,20 +66,20 @@ def _upsert(client, kind, parent_type, parent_id, locale, existing, fields, mapp
     """Create or update one localization. Returns a line for the log."""
     attributes = project_yaml(fields, mapping)
     if not attributes:
-        return f'skipped (no {kind} field)'
+        return f'no {kind} field'
 
     def patch(localization_id, note=''):
         if dry_run:
-            return f'would update {kind} {localization_id} ({", ".join(sorted(attributes))})'
+            return f'would update {localization_id} ({", ".join(sorted(attributes))})'
         client.request('PATCH', f'/v1/{kind}s/{localization_id}', json_body={
             'data': {'type': f'{kind}s', 'id': localization_id, 'attributes': attributes}})
-        return f'updated {kind} {localization_id}{note}'
+        return f'updated {localization_id}'
 
     if locale in existing:
         return patch(existing[locale]['id'])
 
     if dry_run:
-        return f'would create {kind} for {locale} ({", ".join(sorted(attributes))})'
+        return f'would create for {locale} ({", ".join(sorted(attributes))})'
     body = {'data': {
         'type': f'{kind}s',
         'attributes': {**attributes, 'locale': locale},
@@ -61,7 +88,7 @@ def _upsert(client, kind, parent_type, parent_id, locale, existing, fields, mapp
     }}
     try:
         client.request('POST', f'/v1/{kind}s', json_body=body)
-        return f'created {kind} for {locale}'
+        return f'created for {locale}'
     except ASCError as exc:
         # App Store Connect sometimes makes the localization itself. Update it.
         if _is_duplicate_locale(exc):
@@ -74,8 +101,21 @@ def _upsert(client, kind, parent_type, parent_id, locale, existing, fields, mapp
         raise
 
 
+def write_backup(ws, version_name, remote):
+    """Keep the values of the store before a push. Returns the directory."""
+    if not remote:
+        return None
+    target = Path(ws.state_dir) / 'backups' / f'{int(time.time())}-before-push'
+    writer.write_version(target, remote)
+    (target / 'README.txt').write_text(
+        f'The values that App Store Connect held for version {version_name} before a '
+        'push.\nTo put them back, copy the YAML files into a version directory and run '
+        '`aso push`.\n', encoding='utf-8')
+    return target
+
+
 def cmd_push(ws, locales, dry_run=False, only_locale=None, force=False, verbose=False,
-             client=None):
+             version_name='', backup=True, client=None):
     """Push `{locale: {field: value}}`. Returns an exit code."""
     errors = []
     for code, fields in select_locales(locales, only_locale):
@@ -90,19 +130,43 @@ def cmd_push(ws, locales, dry_run=False, only_locale=None, force=False, verbose=
     version = find_editable_version(client, allow_waiting_for_review=force)
     version_id = version['id']
     attributes = version.get('attributes', {})
+    version_name = version_name or attributes.get('versionString', '?')
     print(f'Editable version: {attributes.get("versionString", "?")} '
           f'(state {attributes.get("appStoreState", "?")})')
 
     app_info = find_editable_app_info(client)
     app_info_id = app_info['id']
-
     existing_version = list_version_localizations(client, version_id)
     existing_info = list_app_info_localizations(client, app_info_id)
-    if dry_run:
-        print('(dry run — the tool sends nothing)')
 
-    done, failed = [], []
+    wanted = dict(select_locales(locales, only_locale))
+    current = remote_view(existing_version, existing_info)
+    current = {code: fields for code, fields in current.items() if code in wanted}
+    changes = compare.diff_locales(wanted, current, fields=PUSHABLE_FIELDS)
+    changed_locales = {change.locale for change in changes}
+
+    if not changes:
+        print('\n✅ Every locale already holds these values. There is nothing to send.')
+        return 0
+
+    locale_count, field_count = compare.summarize(changes)
+    print(f'\n{field_count} field(s) in {locale_count} locale(s) would change:\n')
+    for line in compare.format_changes(changes, 'new', 'store', paint=paint):
+        print(line)
+
+    if dry_run:
+        print('\n(dry run — the tool sent nothing)')
+        return 0
+
+    backup_dir = write_backup(ws, version_name, current) if backup else None
+    if backup_dir:
+        print(f'\nThe values of the store are in {backup_dir}')
+
+    done, failed, skipped = [], [], []
     for code, fields in select_locales(locales, only_locale):
+        if code not in changed_locales:
+            skipped.append(code)
+            continue
         print(f'\n[{code}]')
         try:
             message = _upsert(client, 'appStoreVersionLocalization', 'appStoreVersion',
@@ -122,13 +186,20 @@ def cmd_push(ws, locales, dry_run=False, only_locale=None, force=False, verbose=
             failed.append((code, f'{type(exc).__name__}: {exc}'))
 
     print('\n' + '=' * 60)
-    print(f'Done. Success: {len(done)}   Failed: {len(failed)}')
+    print(f'Done. Sent: {len(done)}   Already correct: {len(skipped)}   '
+          f'Failed: {len(failed)}')
     if failed:
         print('\nFailures:')
         for code, message in failed:
             print(f'  - {code}: {message.splitlines()[0]}')
         return 1
-    if not dry_run:
-        print('\nApple shows the new text on the product page after review. '
-              'Run `aso pull` later to confirm what is live.')
+
+    if done:
+        conn = db.connect(ws.db_path)
+        try:
+            db.save_sync_snapshot(conn, version_name, wanted, 'push')
+        finally:
+            conn.close()
+    print('\nApple shows the new text on the product page after review. '
+          'Run `aso pull --check` later to confirm what is live.')
     return 0

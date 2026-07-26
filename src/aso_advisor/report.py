@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import rules
+from .color import paint
+from .color import severity as paint_severity
 from .model import SEVERITIES
 
 SEV_ICON = {'CRITICAL': '🟥', 'HIGH': '🟧', 'MEDIUM': '🟨', 'LOW': '⬜', 'INFO': 'ℹ️'}
@@ -219,22 +221,23 @@ def print_console(ctx, run_id, suggestions, stats, path=None):
     print(bar)
     print(f' open: {stats["open"]}   new: {stats["new"]}   regressed: {stats["regressed"]}'
           f'   resolved: {len(stats["resolved"])}')
-    print(' ' + '  '.join(f'{SEV_ICON[s]} {s}:{counts[s]}' for s in SEVERITIES))
+    print(' ' + '  '.join(paint_severity(s, f'{SEV_ICON[s]} {s}:{counts[s]}')
+                          for s in SEVERITIES))
     print(bar)
     if stats['resolved']:
-        print('\n ✅ RESOLVED since the run before:')
+        print('\n ' + paint('✅ RESOLVED since the run before:', 'green'))
         for r in stats['resolved'][:10]:
             print(f'    - {r["title"]}')
     for sev in SEVERITIES:
         batch = [s for s in open_items if s.severity == sev]
         if not batch or sev == 'INFO':
             continue
-        print(f'\n {SEV_ICON[sev]} {sev}')
+        print(f'\n {paint_severity(sev, f"{SEV_ICON[sev]} {sev}")}')
         for s in batch:
             flag = ' [NEW]' if s.is_new else (' [REGRESSED]' if s.regressed else '')
-            print(f'   {s.fid}{flag}  {s.title}')
+            print(f'   {paint(s.fid, "dim")}{flag}  {s.title}')
             if s.fix and sev in ('CRITICAL', 'HIGH'):
-                print(f'              → {s.fix}')
+                print('              ' + paint(f'→ {s.fix}', 'dim'))
     info = [s for s in open_items if s.severity == 'INFO']
     if info:
         print(f'\n ℹ️  {len(info)} note(s). The report file has them.')

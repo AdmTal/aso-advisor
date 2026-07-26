@@ -1,0 +1,15 @@
+# The text on your screenshots. The store indexes it, and no tool can read the
+# text inside an image, so write it here and `aso audit` can check it.
+#
+# One line per screenshot, in the display order. A locale can also hold one
+# list per device when the captions differ.
+#
+# The de-DE captions below say nothing that a user searches for. The audit
+# reports that.
+locales:
+  en-US:
+    - Offline maps for the whole park
+    - See every metre of climb before you go
+    - Waypoints and compass with no signal
+  de-DE:
+    - Schön gestaltet

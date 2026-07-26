@@ -158,9 +158,51 @@ Read what is live into the workspace.
 
 ```bash
 aso pull                          # the live version, into versions/<its name>/
+aso pull --check                  # write nothing; report the differences
 aso pull --editable               # the version that you prepare
 aso pull --metadata-version 3.0   # write into a directory that you name
 aso pull --locale de-DE           # one locale only
+aso pull --force                  # overwrite work that nobody pushed
+```
+
+### `--check`: has anybody changed the metadata?
+
+```
+$ aso pull --check
+live version: 2.1 (state READY_FOR_SALE)
+
+⚠️  2 field(s) in 1 locale(s) differ from the store.
+
+[en-US]
+  subtitle:
+    - store Offline Maps for Hiking
+    + yours Offline Maps for Backpacking
+  promotional_text: only in yours
+    yours New in 2.2: park-wide downloads.
+
+"yours" is the workspace, "store" is App Store Connect.
+```
+
+The command writes nothing and returns exit code 2 when the two do not match.
+Run it every week in a job. It finds the change that a teammate made in the web
+interface, and it tells you when the audit is reading YAML that is out of date.
+
+### Your drafts are safe
+
+A plain `aso pull` used to overwrite everything. Now the tool remembers the
+values of the last pull and the last push, so it knows which side changed:
+
+- the store changed and your files match the last sync → the pull writes;
+- your files hold work that nobody pushed → the pull stops and shows it.
+
+```
+⛔ aso/versions/2.1 holds 2 field(s) in 1 locale(s) that the store does not have.
+…
+A pull would replace them. Choose one:
+  aso pull --force                     take the store and lose the work above
+  aso pull --metadata-version <name>   write the store into another directory
+  aso push --dry-run                   send your work to the store instead
+  aso pull --check                     only report, never write
 ```
 
 The command writes one directory per version and keeps two things that only a
@@ -190,19 +232,40 @@ aso push --metadata-version 2.2   # a version that is not the newest
 aso push --force                  # a version in WAITING_FOR_REVIEW
 ```
 
-Two guards run before the first request:
+Four things happen before the first change:
 
 1. **The length check**, on your machine. A field that is too long stops the
    push, and the message names the locale and the field.
 2. **The audit.** A CRITICAL finding stops the push. Use `--skip-audit` when
    you disagree.
+3. **The difference**, field by field, against the values that the store holds
+   now:
+
+   ```
+   2 field(s) in 1 locale(s) would change:
+
+   [en-US]
+     keywords:
+       - store gps,compass,elevation
+       + new   gps,compass,elevation,waypoint
+     promotional_text: only in new
+       new   New in 2.2: park-wide downloads.
+   ```
+
+   A locale whose values already match is skipped, so a repeated push sends
+   nothing and a push after a partial failure only finishes the rest.
+
+4. **The backup.** The values of the store go into
+   `state/backups/<timestamp>-before-push/` as YAML. To undo a push, copy those
+   files into a version directory and push again. `--no-backup` switches it
+   off.
 
 Then the command works locale by locale:
 
 ```
 [de-DE]
-  version: updated appStoreVersionLocalization abc123
-  app info: updated appInfoLocalization def456
+  version: updated abc123
+  app info: updated def456
 ```
 
 One bad locale does not stop the others, and the exit code is not zero when
@@ -283,7 +346,8 @@ Notes that save time:
 ## The full loop
 
 ```bash
-aso pull                     # what is live today
+aso pull --check             # did anybody change the store since last time?
+aso pull                     # take what is live today
 aso audit                    # what to change
 # edit aso/versions/2.2/*.yaml
 aso audit --metadata-version 2.2
@@ -302,6 +366,15 @@ aso audit                    # the fixed items resolve by themselves
 Keep the key in a secret, and give the tool the content of the key:
 
 ```yaml
+- name: Find the metadata that somebody changed by hand
+  env:
+    APP_STORE_CONNECT_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+    APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+    APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+  run: |
+    pip install 'aso-advisor[sync]'
+    aso pull --check          # exit code 2 when the store and the repository differ
+
 - name: Push the metadata
   env:
     APP_STORE_CONNECT_KEY_ID: ${{ secrets.ASC_KEY_ID }}

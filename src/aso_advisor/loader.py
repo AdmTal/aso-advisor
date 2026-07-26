@@ -129,6 +129,51 @@ def load_version_raw(path):
     return out
 
 
+def load_iap(path):
+    """Read the `in_app_purchases:` block of a version directory.
+
+    The display name of an in-app purchase is 30 indexed characters, and the
+    description is 45 more. Most apps leave that surface empty. Declare the
+    products here and the audit checks them:
+
+        in_app_purchases:
+          - product_id: com.example.pro
+            locales:
+              en-US:
+                name: Offline Maps Pro
+                description: Download a whole park and walk with no signal.
+
+    Returns [{product_id, locales: {code: {name, description}}}].
+    """
+    out = []
+    for file in metadata_files(Path(path)):
+        try:
+            data = yamlio.load(file.read_text(encoding='utf-8')) or {}
+        except yaml.YAMLError as exc:
+            raise MetadataError(f'{file} is not valid YAML:\n{exc}') from exc
+        block = data.get('in_app_purchases')
+        if not block:
+            continue
+        items = (block if isinstance(block, list)
+                 else [{'product_id': key, **(value or {})} for key, value in block.items()])
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            locales = {}
+            for code, fields in (item.get('locales') or {}).items():
+                fields = fields or {}
+                locales[str(code)] = {
+                    'name': str(fields.get('name', '') or ''),
+                    'description': str(fields.get('description', '') or ''),
+                }
+            out.append({
+                'product_id': str(item.get('product_id') or item.get('id') or '?'),
+                'reference_name': str(item.get('reference_name', '') or ''),
+                'locales': locales,
+            })
+    return out
+
+
 def select_version(versions, wanted=None):
     """Return (name, path) for `wanted`, or the newest version."""
     if not versions:

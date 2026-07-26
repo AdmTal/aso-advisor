@@ -18,5 +18,5 @@ key that you make yourself, and the extra dependency of `aso-advisor[sync]`.
 Documentation: https://github.com/AdmTal/aso-advisor/tree/main/docs
 """
 
-__version__ = '1.1.0'
+__version__ = '1.2.0'
 __all__ = ['__version__']

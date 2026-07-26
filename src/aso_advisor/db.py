@@ -75,6 +75,15 @@ CREATE TABLE IF NOT EXISTS competitor_snapshots (
     price        REAL,
     desc_hash    TEXT DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS sync_snapshots (
+    version TEXT NOT NULL,
+    locale  TEXT NOT NULL,
+    field   TEXT NOT NULL,
+    value   TEXT DEFAULT '',
+    ts      TEXT NOT NULL,
+    source  TEXT NOT NULL,      -- pull | push
+    PRIMARY KEY (version, locale, field)
+);
 CREATE INDEX IF NOT EXISTS idx_rank_term ON rank_checks (term, country, id);
 CREATE INDEX IF NOT EXISTS idx_comp_track ON competitor_snapshots (track_id, country, id);
 """
@@ -167,6 +176,37 @@ def save_snapshots(conn, run_id, version, locales):
     conn.executemany('INSERT INTO snapshots (run_id, version, locale, field, value) '
                      'VALUES (?,?,?,?,?)', rows)
     conn.commit()
+
+
+def save_sync_snapshot(conn, version, locales, source):
+    """Remember the values that the last pull read, or the last push sent.
+
+    The record is what lets `aso pull` tell a local draft from a change that
+    came from the store, and what lets `aso status` count the work that you
+    did not publish yet.
+    """
+    now = _now()
+    conn.execute('DELETE FROM sync_snapshots WHERE version = ?', (version,))
+    rows = [(version, locale, field, '' if value is None else str(value), now, source)
+            for locale, fields in (locales or {}).items()
+            for field, value in (fields or {}).items()]
+    conn.executemany('INSERT OR REPLACE INTO sync_snapshots '
+                     '(version, locale, field, value, ts, source) VALUES (?,?,?,?,?,?)',
+                     rows)
+    conn.commit()
+    return len(rows)
+
+
+def load_sync_snapshot(conn, version):
+    """({locale: {field: value}}, timestamp, source) of the last pull or push."""
+    rows = conn.execute('SELECT locale, field, value, ts, source FROM sync_snapshots '
+                        'WHERE version = ?', (version,)).fetchall()
+    out = {}
+    stamp = source = ''
+    for row in rows:
+        out.setdefault(row['locale'], {})[row['field']] = row['value']
+        stamp, source = row['ts'], row['source']
+    return out, stamp, source
 
 
 def set_status(conn, fid, status, note=''):

@@ -81,6 +81,7 @@ def write_workspace(root, config=MINIMAL_CONFIG, strategy=MINIMAL_STRATEGY, vers
 
 def context(locales, strategy=None, groups=None, **kwargs):
     """A rule context around a dictionary of LocaleMeta objects."""
+    """A rule context around a dictionary of LocaleMeta objects."""
     from aso_advisor.storefronts import STOREFRONT_GROUPS
     return rules.RuleContext(
         locales=locales,

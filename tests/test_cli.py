@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from aso_advisor import cli, scaffold
+from aso_advisor import cli, db, scaffold
 from conftest import EXAMPLE, png_bytes, write_workspace
 
 TITLES = """\
@@ -406,3 +406,126 @@ def test_phrases_prints_and_writes(ws, capsys, monkeypatch):
     text = (ws / 'strategy.yaml').read_text(encoding='utf-8')
     assert 'phrase_targets:' in text
     assert 'trail gps' in text
+
+
+# -- the quality-of-life commands ---------------------------------------------
+
+def test_status_runs_offline(ws, capsys):
+    assert run(['status'], workspace=ws) == 0
+    printed = capsys.readouterr().out
+    assert 'workspace' in printed and 'metadata' in printed and 'next:' in printed
+
+
+def test_import_from_fastlane(tmp_path, capsys):
+    workspace_dir = write_workspace(tmp_path / 'aso')
+    tree = tmp_path / 'fastlane' / 'metadata' / 'en-US'
+    tree.mkdir(parents=True)
+    (tree / 'name.txt').write_text('Trailwise')
+    (tree / 'keywords.txt').write_text('gps,compass')
+    assert run(['import', '--fastlane', str(tree.parent), '--metadata-version', '1.0'],
+               workspace=workspace_dir) == 0
+    assert (workspace_dir / 'versions' / '1.0').is_dir()
+    assert 'Trailwise' in (workspace_dir / 'versions' / '1.0'
+                           / 'titles_and_keywords.yaml').read_text(encoding='utf-8')
+
+
+def test_import_of_a_directory_that_does_not_exist(ws, capsys):
+    assert run(['import', '--fastlane', '/nowhere/at/all'], workspace=ws) == cli.EXIT_ERROR
+    assert 'does not exist' in capsys.readouterr().err
+
+
+def test_audit_can_show_one_locale(tmp_path, capsys):
+    two_locales = """\
+locales:
+  en-US:
+    name: Trailwise
+    subtitle: Offline Maps
+    keywords: gps
+  de-DE:
+    name: Trailwise DE
+    subtitle: Karten
+    keywords: gps
+"""
+    workspace_dir = write_workspace(tmp_path / 'aso',
+                                    versions={'1.0': {'m.yaml': two_locales}})
+    run(['audit', '--no-report', '--no-state', '--locale', 'de-DE'],
+        workspace=workspace_dir)
+    printed = capsys.readouterr().out
+    assert 'de-DE' in printed
+    assert 'en-US:' not in printed
+    assert 'hidden by --locale' in printed
+
+
+def test_rank_with_ad_hoc_terms(ws, monkeypatch, capsys):
+    from aso_advisor import store_api
+
+    seen = []
+
+    def fake_search(_conn, term, country='us', limit=200, ttl_hours=12):
+        seen.append(term)
+        return [{'trackId': 111, 'trackName': 'Test App'}]
+
+    monkeypatch.setattr(store_api, 'search', fake_search)
+    assert run(['rank', '--terms', 'hiking maps, trail gps'], workspace=ws) == 0
+    assert seen == ['hiking maps', 'trail gps']
+    assert '#1' in capsys.readouterr().out
+
+
+def test_rank_history_of_one_term(ws, capsys):
+    conn = db.connect(ws / 'state' / 'aso.sqlite3')
+    db.record_rank(conn, 'hiking maps', 'us', 40, 200, [])
+    db.record_rank(conn, 'hiking maps', 'us', 12, 200, [])
+    conn.close()
+    assert run(['rank', '--history', 'hiking maps'], workspace=ws) == 0
+    printed = capsys.readouterr().out
+    assert '#40' in printed and '#12' in printed
+
+
+def test_rank_history_of_an_unknown_term(ws, capsys):
+    conn = db.connect(ws / 'state' / 'aso.sqlite3')
+    db.record_rank(conn, 'hiking maps', 'us', 40, 200, [])
+    conn.close()
+    run(['rank', '--history', 'nothing here'], workspace=ws)
+    assert 'The history holds: hiking maps' in capsys.readouterr().out
+
+
+def test_rank_history_without_a_term(ws, capsys):
+    conn = db.connect(ws / 'state' / 'aso.sqlite3')
+    db.record_rank(conn, 'hiking maps', 'us', 12, 200, [])
+    conn.close()
+    run(['rank', '--history'], workspace=ws)
+    assert 'hiking maps' in capsys.readouterr().out
+
+
+def test_rank_csv_export(ws, tmp_path):
+    conn = db.connect(ws / 'state' / 'aso.sqlite3')
+    db.record_rank(conn, 'hiking maps', 'us', 12, 200, [])
+    db.record_rank(conn, 'trail gps', 'gb', None, 200, [])
+    conn.close()
+    target = tmp_path / 'out' / 'ranks.csv'
+    assert run(['rank', '--csv', str(target)], workspace=ws) == 0
+    rows = target.read_text(encoding='utf-8').splitlines()
+    assert rows[0] == 'timestamp,term,country,rank,scanned'
+    assert any(row.endswith('hiking maps,us,12,200') for row in rows)
+    assert any(row.endswith('trail gps,gb,,200') for row in rows)
+
+
+def test_pull_check_passes_the_flag(ws, monkeypatch):
+    from aso_advisor.asc import pull as pull_module
+
+    seen = {}
+    monkeypatch.setattr(pull_module, 'cmd_pull',
+                        lambda workspace_arg, **kwargs: seen.update(kwargs) or 0)
+    run(['pull', '--check'], workspace=ws)
+    assert seen['check'] is True and seen['force'] is False
+
+
+def test_push_passes_the_backup_switch(ws, monkeypatch):
+    from aso_advisor.asc import push as push_module
+
+    seen = {}
+    monkeypatch.setattr(push_module, 'cmd_push',
+                        lambda workspace_arg, locales, **kwargs: seen.update(kwargs) or 0)
+    run(['push', '--no-backup', '--dry-run'], workspace=ws)
+    assert seen['backup'] is False
+    assert seen['version_name'] == '1.0'

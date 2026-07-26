@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aso-advisor"
-version = "1.1.0"
+version = "1.2.0"
 description = "A command-line App Store Optimization advisor. It audits your versioned metadata, tracks the suggestions across runs, and reads live data from Apple's public endpoints."
 readme = "README.md"
 license = { file = "LICENSE" }

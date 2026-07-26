@@ -13,12 +13,14 @@ from . import (
     __version__,
     assets,
     db,
+    importers,
     live,
     loader,
     phrases,
     report,
     rules,
     scaffold,
+    status,
     workspace,
 )
 from .model import SEVERITIES
@@ -31,8 +33,10 @@ EXIT_FINDINGS = 2
 EPILOG = """\
 examples:
   aso init --app-id 123456789     make a workspace from your live App Store page
+  aso status                      where this app stands, in one screen
   aso auth                        check the App Store Connect key, or learn to make one
   aso pull                        read the live metadata into the workspace
+  aso pull --check                does the workspace still match the store?
   aso audit                       audit the newest metadata version
   aso audit --fail-on high        the same, with an exit code for a build pipeline
   aso phrases                     propose the target search phrases
@@ -62,6 +66,23 @@ def _split_list(raw):
     return [item.strip().lower() for item in (raw or '').split(',') if item.strip()]
 
 
+def _split_upper(raw):
+    """Locale codes, as the user wrote them."""
+    return [item.strip() for item in (raw or '').split(',') if item.strip()]
+
+
+def _in_scope(suggestion, wanted, groups):
+    """True when a suggestion belongs to one of the locales that you asked for.
+
+    The scope of a suggestion is a locale, a storefront group, or 'global'. A
+    group counts when it indexes one of the locales.
+    """
+    if suggestion.scope in wanted:
+        return True
+    group = groups.get(suggestion.scope)
+    return bool(group and set(group[1]) & set(wanted))
+
+
 def _build_context(ws, version_name=None):
     """Load a metadata version and make the rule context."""
     versions = loader.discover_versions(ws.versions_dir)
@@ -70,6 +91,7 @@ def _build_context(ws, version_name=None):
     prev_name, prev_path = loader.previous_version(versions, name)
     prev_locales = loader.load_version(prev_path) if prev_path else {}
     ctx = rules.RuleContext(
+        iap=loader.load_iap(path),
         locales=locales,
         strategy=ws.strategy,
         groups=ws.config.groups(),
@@ -136,7 +158,8 @@ def cmd_audit(args):
     if ws.config.assets.check and not args.no_assets:
         assets_dir = version_path / 'assets'
         findings.extend(assets.audit(assets_dir, ctx.locales, ws.config.assets,
-                                     ws.config.app.primary_locale))
+                                     ws.config.app.primary_locale,
+                                     phrase_words=ws.strategy.phrase_words))
         asset_rows = assets.summary(assets_dir)
     if ws.config.disabled_rules:
         findings = [s for s in findings if s.rule not in ws.config.disabled_rules]
@@ -148,6 +171,12 @@ def cmd_audit(args):
     db.save_snapshots(conn, run_id, ctx.version, ctx.locales)
     rank_rows = db.rank_summary(conn)
     visible = [s for s in findings if s.status != 'dismissed']
+    wanted_locales = _split_upper(args.locale)
+    hidden_by_filter = 0
+    if wanted_locales:
+        kept = [s for s in visible if _in_scope(s, wanted_locales, ws.config.groups())]
+        hidden_by_filter = len(visible) - len(kept)
+        visible = kept
     stamp = int(time.time())
 
     path = None
@@ -167,6 +196,9 @@ def cmd_audit(args):
         if hidden:
             print(f' ({hidden} dismissed suggestion(s) are hidden. '
                   'Use `aso list --all` to see them.)\n')
+        if hidden_by_filter:
+            print(f' ({hidden_by_filter} suggestion(s) of other locales are hidden by '
+                  f'--locale {args.locale}. The report file holds them all.)\n')
     conn.close()
 
     if args.fail_on and args.fail_on != 'none':
@@ -344,9 +376,16 @@ def cmd_rules(args):
 def cmd_rank(args):
     ws = _load(args)
     conn = db.connect(ws.db_path)
-    live.cmd_rank(ws, conn, countries=_split_list(args.countries) or None,
-                  top=args.top, fresh=args.fresh)
-    conn.close()
+    try:
+        if args.csv or args.history is not None:
+            return live.cmd_rank_history(ws, conn, term=args.history or None,
+                                         csv_path=args.csv)
+        live.cmd_rank(ws, conn, countries=_split_list(args.countries) or None,
+                      top=args.top, fresh=args.fresh,
+                      terms=[t.strip() for t in (args.terms or '').split(',')
+                             if t.strip()] or None)
+    finally:
+        conn.close()
     return EXIT_OK
 
 
@@ -483,7 +522,8 @@ def cmd_pull(args):
 
     ws = _load(args)
     return pull.cmd_pull(ws, version=args.metadata_version, from_editable=args.editable,
-                         locale=args.locale, verbose=args.verbose)
+                         locale=args.locale, verbose=args.verbose,
+                         check=args.check, force=args.force)
 
 
 def cmd_push(args):
@@ -510,7 +550,8 @@ def cmd_push(args):
             print('\nFix them, or use --skip-audit to push anyway.', file=sys.stderr)
             return EXIT_FINDINGS
     return push.cmd_push(ws, raw, dry_run=args.dry_run, only_locale=args.locale,
-                         force=args.force, verbose=args.verbose)
+                         force=args.force, verbose=args.verbose, version_name=name,
+                         backup=not args.no_backup)
 
 
 def cmd_push_assets(args):
@@ -527,6 +568,21 @@ def cmd_push_assets(args):
         device=args.device, all_locales=args.all_locales,
         missing_only=args.missing_only, dry_run=args.dry_run, force=args.force,
         verbose=args.verbose)
+
+
+def cmd_status(args):
+    ws = _load(args)
+    return status.cmd_status(ws, online=args.online)
+
+
+def cmd_import(args):
+    ws = _load(args)
+    try:
+        return importers.cmd_import(ws, args.fastlane, version=args.metadata_version,
+                                    force=args.force)
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return EXIT_ERROR
 
 
 def cmd_where(args):
@@ -572,10 +628,24 @@ def build_parser():
     p.add_argument('--no-state', action='store_true',
                    help='do not write to the database (for a build pipeline)')
     p.add_argument('--no-assets', action='store_true', help='skip the asset checks')
+    p.add_argument('--locale', help='show only the findings of these locales '
+                                    '(comma-separated). The report keeps them all.')
     p.add_argument('--fail-on', choices=['critical', 'high', 'medium', 'low', 'info', 'none'],
                    default='none',
                    help='exit with code 2 if a suggestion is at this severity or above')
     p.set_defaults(func=cmd_audit)
+
+    p = sub.add_parser('status', help='where this app stands, in one screen')
+    p.add_argument('--online', action='store_true',
+                   help='also ask App Store Connect which version is live')
+    p.set_defaults(func=cmd_status)
+
+    p = sub.add_parser('import', help='bring metadata from another tool into the workspace')
+    p.add_argument('--fastlane', required=True,
+                   help='the fastlane metadata directory, for example fastlane/metadata')
+    p.add_argument('--metadata-version', help='the version directory to write')
+    p.add_argument('--force', action='store_true', help='overwrite the directory')
+    p.set_defaults(func=cmd_import)
 
     p = sub.add_parser('list', help='list the suggestions')
     p.add_argument('--all', action='store_true', help='include dismissed and resolved items')
@@ -616,7 +686,11 @@ def build_parser():
 
     p = sub.add_parser('rank', help='the live search position of your target phrases')
     p.add_argument('--countries', help='comma-separated country codes')
+    p.add_argument('--terms', help='check these terms instead of the strategy file')
     p.add_argument('--top', type=int, default=100, help='results to read per term (max 200)')
+    p.add_argument('--history', nargs='?', const='', metavar='TERM',
+                   help='print the stored history instead of asking the store')
+    p.add_argument('--csv', metavar='PATH', help='write the whole rank history to a file')
     p.add_argument('--fresh', action='store_true', help='do not use the cache')
     p.set_defaults(func=cmd_rank)
 
@@ -674,6 +748,10 @@ def build_parser():
     p.add_argument('--editable', action='store_true',
                    help='read the version that you prepare, not the live one')
     p.add_argument('--locale', help='read one locale only')
+    p.add_argument('--check', action='store_true',
+                   help='write nothing; report the differences and exit 2 on drift')
+    p.add_argument('--force', action='store_true',
+                   help='overwrite local work that nobody pushed yet')
     p.add_argument('--verbose', action='store_true')
     p.set_defaults(func=cmd_pull)
 
@@ -686,6 +764,8 @@ def build_parser():
                    help='allow a change to a version in WAITING_FOR_REVIEW')
     p.add_argument('--skip-audit', action='store_true',
                    help='push even when the audit finds a CRITICAL problem')
+    p.add_argument('--no-backup', action='store_true',
+                   help='do not save the values of the store before the push')
     p.add_argument('--verbose', action='store_true')
     p.set_defaults(func=cmd_push)
 

@@ -50,3 +50,18 @@ locales:
     subtitle_eng: Offline Mountain Navigation
     keywords: |-
       ハイキング,トレイル,山,地図,オフライン,コンパス,標高,ルート,散歩,縦走
+
+# In-app purchases. The display name is 30 characters that the store indexes,
+# and the description adds 45 more. Most apps leave that surface empty.
+# The audit checks the lengths, and it tells you when a name only repeats words
+# that you already index.
+in_app_purchases:
+  - product_id: com.example.trailwise.parks
+    reference_name: Offline park packs
+    locales:
+      en-US:
+        name: Offline Park Packs
+        description: Download a park and walk with no signal.
+      de-DE:
+        name: Offline-Kartenpakete
+        description: Lade Regionen herunter, wandere offline.

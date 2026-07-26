@@ -83,7 +83,8 @@ file, a strategy file, and a first version directory. Put your live metadata
 into the version YAML, then:
 
 ```bash
-aso pull         # or fill the version YAML by hand
+aso pull         # or `aso import --fastlane fastlane/metadata`
+aso status       # where this app stands, in one screen
 aso audit        # audit the newest version, write a report
 aso list         # the open suggestions
 aso show S-1a2b3c4d
@@ -99,6 +100,26 @@ workspace of this repository:
 
 ```bash
 aso --workspace examples/trailwise audit --no-state --no-report
+```
+
+## One screen for "where do I stand?"
+
+```
+$ aso status
+  workspace   /Users/you/projects/trailwise/aso
+  app         Trailwise  ·  id 123456789
+  metadata    2.1 (newest of 3)  ·  12 locale(s)  ·  7 asset(s)
+  unpushed    2 field(s) in 1 locale(s) changed since the last pull (3d ago)
+  audit       run #12 2h ago  ·  9 open   high:2  medium:5  low:2
+  ranks       12 term(s), 9 in the results  ·  last check 1d ago
+              ▲ +9 offline hiking maps (us) → #14
+  key         key ABCDE12345 — `aso auth --check` confirms it
+```
+
+Already using `fastlane deliver`? One command converts the tree:
+
+```bash
+aso import --fastlane fastlane/metadata
 ```
 
 ## The workspace: one folder in any project
@@ -162,6 +183,12 @@ The tool never writes to App Store Connect. The full specification is in
 
 **Localized assets**
 
+- **In-app purchase names.** Each one is 30 indexed characters, and the
+  description adds 45. Most apps leave that surface empty, and no other tool
+  audits it.
+- **Screenshot captions.** The store indexes the text on your screenshots. Put
+  the captions in `assets/captions.yaml` and the audit checks that they hold
+  words that people search for.
 - Screenshots with the wrong pixel size, or with an alpha channel that App
   Store Connect refuses.
 - Sets that are too large, app previews that are not 15 to 30 seconds long,
@@ -229,10 +256,20 @@ whole loop lives in your repository:
 ```bash
 aso auth            # the steps to make a key, then a check that Apple accepts it
 aso pull            # the live metadata of every locale, into the workspace
-aso push --dry-run  # exactly what a push would change
+aso pull --check    # did anybody change the store since last time?
+aso push --dry-run  # exactly what a push would change, value by value
 aso push            # send the text back
 aso push-assets     # upload the localized screenshots and app previews
 ```
+
+`aso pull --check` is the weekly job that finds the edit a teammate made in the
+web interface. A plain `aso pull` never deletes a draft that nobody pushed: the
+tool remembers the last sync, so it can tell your work from a change that came
+from the store.
+
+`aso push --dry-run` prints the old value and the new value of every field, a
+locale that already matches is skipped, and the values of the store go into a
+backup directory before anything changes.
 
 `aso push-assets` uploads only the sets that changed: App Store Connect keeps
 a checksum per asset, and the tool compares it with your files. It reads the

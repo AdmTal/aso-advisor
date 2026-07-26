@@ -161,9 +161,15 @@ locales:
 
 ### With fastlane
 
-If you already use `fastlane deliver`, you have the metadata as text files in
-`fastlane/metadata/`. Copy the values into the YAML blocks. One block per
-locale directory.
+If you already use `fastlane deliver`, one command converts the tree:
+
+```bash
+aso import --fastlane fastlane/metadata --metadata-version 2.1
+```
+
+The command reads one directory per locale and one text file per field, and it
+writes the YAML of the workspace. Your fastlane tree does not change, and
+nothing is uploaded.
 
 ### With the App Store Connect API
 

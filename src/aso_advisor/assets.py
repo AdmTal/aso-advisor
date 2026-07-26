@@ -26,12 +26,26 @@ import re
 import struct
 from pathlib import Path
 
-from .model import Suggestion
+from .model import Suggestion, tokens
 
 ASSET_RULES = [
     'ASSET_MISSING', 'ASSET_ORPHAN', 'ASSET_COUNT', 'ASSET_SIZE', 'ASSET_ALPHA',
     'ASSET_VIDEO_LENGTH', 'ASSET_DEVICE', 'ASSET_ORDER',
+    'CAPTION_MISSING', 'CAPTION_LONG', 'CAPTION_KEYWORDS', 'CAPTION_COUNT',
 ]
+
+# The store indexes the text in a screenshot caption, but a machine cannot read
+# the text inside an image. Write the captions in `assets/captions.yaml` and the
+# audit can check them:
+#
+#     locales:
+#       en-US:
+#         - Download a whole park for offline use
+#         - See every metre of climb before you go
+#
+# A locale can also hold one list per device, when the captions differ.
+CAPTIONS_FILE = 'captions.yaml'
+CAPTION_MAX_CHARACTERS = 60
 
 SCREENSHOT_EXTENSIONS = {'.png', '.jpg', '.jpeg'}
 VIDEO_EXTENSIONS = {'.mp4', '.mov', '.m4v'}
@@ -216,7 +230,109 @@ def scan(assets_dir):
 
 # -- rules --------------------------------------------------------------------
 
-def audit(assets_dir, locales, settings, primary_locale='en-US'):
+def read_captions(assets_dir):
+    """{locale: {device: [caption]}} from `assets/captions.yaml`, or None.
+
+    A locale can hold a plain list, which then applies to every device. The
+    function returns None when the file does not exist, because the caption
+    rules are a feature that you switch on by writing the file.
+    """
+    from . import yamlio
+
+    path = Path(assets_dir) / CAPTIONS_FILE
+    if not path.is_file():
+        return None
+    data = yamlio.load_path(path)
+    block = (data or {}).get('locales') or {}
+    out = {}
+    for code, value in block.items():
+        if isinstance(value, dict):
+            out[str(code)] = {normalize_device(device): [str(c) for c in (items or [])]
+                              for device, items in value.items()}
+        elif isinstance(value, list):
+            out[str(code)] = {'*': [str(c) for c in value]}
+    return out
+
+
+def _check_captions(tree, captions, settings, phrase_words, primary_locale):
+    """The rules for the caption text of the screenshots.
+
+    The store indexes the text in a screenshot caption. A machine cannot read
+    the text inside an image, so these rules read `captions.yaml` instead. No
+    file means that you do not use the feature, and the rules stay quiet.
+    """
+    if captions is None:
+        return []
+    out = []
+    required = set(settings.required_locales or ([primary_locale] if primary_locale
+                                                 else []))
+    for code, entry in sorted(tree.items()):
+        shots = entry.get('screenshots') or {}
+        if not shots:
+            continue
+        declared = captions.get(code) or {}
+        if not declared:
+            if code in required:
+                out.append(Suggestion(
+                    'CAPTION_MISSING', code, code, 'LOW',
+                    f'{code}: the screenshots have no caption text in captions.yaml',
+                    detail='The store indexes the words in a screenshot caption, and '
+                           'this tool cannot read the text inside an image. Write the '
+                           'captions in assets/captions.yaml and the audit can check '
+                           'them.',
+                    fix=f'Add a `{code}:` block to assets/{CAPTIONS_FILE} with one '
+                        'line per screenshot.',
+                ))
+            continue
+
+        every = [caption for group in declared.values() for caption in group]
+        long_ones = [c for c in every if len(c) > CAPTION_MAX_CHARACTERS]
+        if long_ones:
+            out.append(Suggestion(
+                'CAPTION_LONG', f'{code}:{len(long_ones)}', code, 'LOW',
+                f'{code}: {len(long_ones)} caption(s) are longer than '
+                f'{CAPTION_MAX_CHARACTERS} characters',
+                detail='; '.join(f'"{c[:70]}" ({len(c)})' for c in long_ones[:3])
+                       + '. A user reads a screenshot in about one second.',
+                fix='Cut each caption to one short statement of a benefit.',
+            ))
+
+        for device, group in sorted(declared.items()):
+            if device == '*':
+                counts = {len(files) for files in shots.values()}
+                if counts and len(group) not in counts:
+                    out.append(Suggestion(
+                        'CAPTION_COUNT', f'{code}:*', code, 'LOW',
+                        f'{code}: {len(group)} caption(s) for '
+                        f'{"/".join(str(c) for c in sorted(counts))} screenshot(s)',
+                        fix='Write one caption per screenshot, in the display order.',
+                    ))
+            elif device in shots and len(group) != len(shots[device]):
+                out.append(Suggestion(
+                    'CAPTION_COUNT', f'{code}:{device}', code, 'LOW',
+                    f'{code}/{device}: {len(group)} caption(s) for '
+                    f'{len(shots[device])} screenshot(s)',
+                    fix='Write one caption per screenshot, in the display order.',
+                ))
+
+        if phrase_words:
+            words = set()
+            for caption in every:
+                words.update(tokens(caption))
+            if not (words & set(phrase_words)):
+                out.append(Suggestion(
+                    'CAPTION_KEYWORDS', code, code, 'MEDIUM',
+                    f'{code}: no caption holds a word of your target phrases',
+                    detail='The store indexes caption text. A caption that only says '
+                           '"Beautiful design" spends indexed characters on nothing, '
+                           'and it tells the user nothing either.',
+                    fix='Write real search phrases in the captions, for example the '
+                        f'words: {", ".join(sorted(phrase_words)[:6])}.',
+                ))
+    return out
+
+
+def audit(assets_dir, locales, settings, primary_locale='en-US', phrase_words=()):
     """Return the suggestions for the asset tree of one version."""
     out = []
     tree = scan(assets_dir)
@@ -250,6 +366,9 @@ def audit(assets_dir, locales, settings, primary_locale='en-US'):
             out.extend(_check_screenshot_set(code, device, files, sizes, settings))
         for device, files in sorted(entry['previews'].items()):
             out.extend(_check_preview_set(code, device, files, settings))
+
+    out.extend(_check_captions(tree, read_captions(assets_dir), settings,
+                               set(phrase_words or ()), primary_locale))
     return out
 
 

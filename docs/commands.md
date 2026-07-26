@@ -6,6 +6,8 @@ same information in the terminal.
 - [Global options](#global-options)
 - [Exit codes](#exit-codes)
 - [`aso init`](#aso-init)
+- [`aso status`](#aso-status)
+- [`aso import`](#aso-import)
 - [`aso audit`](#aso-audit)
 - [`aso list` · `show` · `dismiss` · `reopen` · `history`](#the-lifecycle-of-a-suggestion)
 - [`aso versions` · `diff` · `assets` · `rules` · `where`](#the-workspace-commands)
@@ -74,6 +76,68 @@ the keyword field, so you add those by hand.
 
 ---
 
+## `aso status`
+
+Where this app stands, in one screen. The command works offline.
+
+```bash
+aso status
+aso status --online     # also ask App Store Connect which version is live
+```
+
+```
+  workspace   /Users/you/projects/trailwise/aso
+  app         Trailwise  ·  id 123456789
+  metadata    2.1 (newest of 3)  ·  12 locale(s)  ·  7 asset(s)
+  unpushed    2 field(s) in 1 locale(s) changed since the last pull (3d ago)
+              en-US keywords
+              en-US subtitle
+  audit       run #12 2h ago  ·  9 open   high:2  medium:5  low:2
+              2 new, 4 resolved in that run
+  ranks       12 term(s), 9 in the results  ·  last check 1d ago
+              ▲ +9 offline hiking maps (us) → #14
+  cache       48 stored answer(s), kept 12h
+  key         key ABCDE12345 — `aso auth --check` confirms it
+
+next:
+  aso audit              the newest version
+  aso rank               where you stand today
+```
+
+**unpushed** counts the fields that differ from the last `aso pull` or
+`aso push`. It is the answer to "did I already publish this?". The line says
+"unknown" until the first pull or push, because the tool has nothing to
+compare against yet.
+
+`--online` adds the live version of the store and a drift count. Use
+`aso pull --check` to see the drift field by field.
+
+## `aso import`
+
+Bring the metadata of another tool into the workspace. Today the command reads
+a `fastlane deliver` tree.
+
+```bash
+aso import --fastlane fastlane/metadata
+aso import --fastlane fastlane/metadata --metadata-version 2.1
+```
+
+| Option | What it does |
+| --- | --- |
+| `--fastlane PATH` | The fastlane metadata directory. |
+| `--metadata-version` | The version directory to write (default `imported`). |
+| `--force` | Overwrite a directory that exists. |
+
+The command reads one directory per locale and one text file per field, and it
+maps `release_notes.txt` to `whats_new` and `privacy_url.txt` to
+`privacy_policy_url`. The `default/` directory of fastlane fills the gaps of
+each locale, as fastlane does. Directories that are not locales
+(`review_information`, and anything else) are skipped and named in the output.
+
+Nothing is uploaded, and the fastlane tree does not change. Screenshots stay
+where they are; the output tells you where the workspace expects them.
+
+
 ## `aso audit`
 
 Audit a metadata version, write a report, and update the state. This is the
@@ -93,6 +157,7 @@ aso audit --fail-on critical --no-state      # for a build pipeline
 | `--no-report` | Do not write a report file. |
 | `--no-state` | Use a database in memory. The command writes nothing to disk. |
 | `--no-assets` | Skip the screenshot and app preview rules. |
+| `--locale CODE[,CODE]` | Show only the findings of these locales. The report file keeps them all. |
 | `--fail-on LEVEL` | Return exit code 2 if a suggestion is at LEVEL or above. One of `critical`, `high`, `medium`, `low`, `info`, `none`. |
 
 The report file is `aso/reports/aso-report-<unix timestamp>.md`. It holds the
@@ -208,8 +273,18 @@ aso rank --fresh
 | Option | Default | What it does |
 | --- | --- | --- |
 | `--countries` | `markets.rank_countries` | Comma-separated country codes. |
+| `--terms` | your strategy | Check these terms instead, without editing a file. |
 | `--top` | 100 | How many results to read per term. The maximum is 200. |
+| `--history [TERM]` | | Print the stored history. No request goes out. |
+| `--csv PATH` | | Write the whole history to a CSV file. |
 | `--fresh` | | Do not use the cache. |
+
+```bash
+aso rank --terms "offline hiking maps, trail gps"   # a quick check
+aso rank --history                                  # every term, last and before
+aso rank --history "offline hiking maps"            # one series, per storefront
+aso rank --csv ranks.csv                            # for a spreadsheet or a graph
+```
 
 ```
 == US ==
@@ -387,13 +462,25 @@ Read the metadata of the store into the workspace.
 
 ```bash
 aso pull                          # the live version
+aso pull --check                  # write nothing; report the differences
 aso pull --editable               # the version that you prepare
 aso pull --metadata-version 3.0   # write into a directory that you name
 aso pull --locale de-DE
+aso pull --force                  # overwrite local work that nobody pushed
 ```
 
 The command keeps the `language:` notes and the `*_eng` back-translations of
 the directory. Run it before an audit.
+
+**`--check` never writes.** It prints the differences and returns exit code 2
+when the workspace and the store do not match. It is the weekly job that finds
+the changes that somebody made in the web interface.
+
+**A plain `aso pull` protects your drafts.** The tool remembers the values of
+the last pull and the last push, so it knows the difference between a local
+draft and a change that came from the store. It applies a change from the
+store without a question, and it refuses to delete a draft until you pass
+`--force`.
 
 ### `aso push`
 
@@ -414,10 +501,27 @@ aso push --skip-audit
 | `--locale` | One locale only. |
 | `--force` | Allow a change to a version in WAITING_FOR_REVIEW. |
 | `--skip-audit` | Push even when the audit finds a CRITICAL problem. |
+| `--no-backup` | Do not save the values of the store first. |
 | `--verbose` | Print the requests and the answers. |
 
-The field lengths are checked on your machine, and the audit runs, before the
-first request. One bad locale does not stop the others.
+Before the first change the command prints the exact difference:
+
+```
+2 field(s) in 1 locale(s) would change:
+
+[en-US]
+  keywords:
+    - store gps,compass,elevation
+    + new   gps,compass,elevation,waypoint
+  promotional_text: only in new
+    new   New in 2.2: park-wide downloads.
+```
+
+A locale whose values already match is skipped, so a repeated push sends
+nothing. The field lengths are checked on your machine, and the audit runs,
+before the first request. The values of the store go into
+`state/backups/<timestamp>-before-push/` first. One bad locale does not stop
+the others.
 
 ### `aso push-assets`
 

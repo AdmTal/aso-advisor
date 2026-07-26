@@ -87,7 +87,7 @@ def test_pull_writes_the_live_metadata(ws, capsys):
     assert written['en-US']['name'] == 'Trailwise Live'
     assert written['en-US']['keywords'] == 'gps,map'
     assert written['en-US']['promotional_text'] == 'Try it'
-    assert 'new version directory' in capsys.readouterr().out
+    assert 'written into' in capsys.readouterr().out
 
 
 def test_pull_into_a_named_version(ws):
@@ -110,7 +110,7 @@ locales:
     client = FakeClient(collections=base_collections(
         version_locales=[localization('de-DE', 'l1', keywords='karte')],
         info_locales=[localization('de-DE', 'a1', name='Neuer Name')]))
-    pull.cmd_pull(ws, version='2.1', from_editable=True, client=client)
+    pull.cmd_pull(ws, version='2.1', from_editable=True, force=True, client=client)
     text = (target / 'titles.yaml').read_text(encoding='utf-8')
     assert 'language: German' in text
     assert 'name_eng: Old name' in text
@@ -400,3 +400,174 @@ def test_push_assets_skips_a_locale_without_a_localization(tmp_path, capsys):
         version_locales=[localization('en-US', 'l1')]))
     assert media.cmd_push_assets(ws, assets_dir=assets_dir, client=client) == 1
     assert 'no localization' in capsys.readouterr().out
+
+
+# -- drift and the safety of pull ---------------------------------------------
+
+def store_with(fields, version='2.1'):
+    """A fake client whose store holds `fields` for en-US."""
+    version_attrs = {'id': 'v1', 'attributes': {'versionString': version,
+                                                'appStoreState': 'READY_FOR_SALE'}}
+    client = FakeClient(collections={
+        '/v1/apps/123/appStoreVersions': [version_attrs],
+        '/v1/apps/123/appInfos': [{'id': 'i1',
+                                   'attributes': {'appStoreState': 'READY_FOR_SALE'}}],
+        '/v1/appStoreVersions/v1/appStoreVersionLocalizations': [
+            localization('en-US', 'l1',
+                         **{k: v for k, v in fields.items()
+                            if k in ('keywords', 'description', 'promotionalText',
+                                     'whatsNew', 'marketingUrl', 'supportUrl')})],
+        '/v1/appInfos/i1/appInfoLocalizations': [
+            localization('en-US', 'a1',
+                         **{k: v for k, v in fields.items()
+                            if k in ('name', 'subtitle', 'privacyPolicyUrl')})],
+    })
+    return client
+
+
+LIVE = {'name': 'Trailwise', 'subtitle': 'Offline Maps', 'keywords': 'gps,compass',
+        'description': 'What the app does.',
+        'supportUrl': 'https://example.test/support'}
+
+
+def test_pull_check_reports_no_drift(ws, capsys):
+    client = store_with(LIVE)
+    assert pull.cmd_pull(ws, check=True, client=client) == 0
+    assert 'matches the store' in capsys.readouterr().out
+
+
+def test_pull_check_reports_drift_and_writes_nothing(ws, capsys):
+    before = (ws.versions_dir / '2.1' / 'titles.yaml').read_text(encoding='utf-8')
+    client = store_with({**LIVE, 'name': 'Renamed in the web interface'})
+    assert pull.cmd_pull(ws, check=True, client=client) == pull.EXIT_DRIFT
+    printed = capsys.readouterr().out
+    assert 'differ from the store' in printed
+    assert 'Renamed in the web interface' in printed
+    assert (ws.versions_dir / '2.1' / 'titles.yaml').read_text(encoding='utf-8') == before
+
+
+def test_pull_refuses_to_lose_local_work(ws, capsys):
+    client = store_with({**LIVE, 'keywords': 'gps'})
+    assert pull.cmd_pull(ws, client=client) == pull.EXIT_DRIFT
+    printed = capsys.readouterr().out
+    assert 'aso pull --force' in printed
+    # The draft is still there.
+    assert 'gps,compass' in (ws.versions_dir / '2.1' / 'titles.yaml').read_text()
+
+
+def test_pull_force_overwrites(ws):
+    client = store_with({**LIVE, 'keywords': 'gps'})
+    assert pull.cmd_pull(ws, force=True, client=client) == 0
+    assert loader.load_version_raw(ws.versions_dir / '2.1')['en-US']['keywords'] == 'gps'
+
+
+def test_pull_overwrites_freely_when_the_change_came_from_the_store(ws):
+    from aso_advisor import db
+
+    # The workspace matches the last pull, so nothing local is at risk.
+    conn = db.connect(ws.db_path)
+    db.save_sync_snapshot(conn, '2.1',
+                          loader.load_version_raw(ws.versions_dir / '2.1'), 'pull')
+    conn.close()
+    client = store_with({**LIVE, 'name': 'Renamed by a teammate'})
+    assert pull.cmd_pull(ws, client=client) == 0
+    assert (loader.load_version_raw(ws.versions_dir / '2.1')['en-US']['name']
+            == 'Renamed by a teammate')
+
+
+def test_pull_remembers_what_it_read(ws):
+    from aso_advisor import db
+
+    client = store_with(LIVE)
+    pull.cmd_pull(ws, force=True, client=client)
+    conn = db.connect(ws.db_path)
+    remembered, stamp, source = db.load_sync_snapshot(conn, '2.1')
+    conn.close()
+    assert remembered['en-US']['keywords'] == 'gps,compass'
+    assert source == 'pull' and stamp
+
+
+# -- the push diff ------------------------------------------------------------
+
+def test_push_shows_the_values_that_would_change(ws, capsys):
+    client = FakeClient(collections=base_collections(
+        version_locales=[localization('en-US', 'l1', keywords='old,words')],
+        info_locales=[localization('en-US', 'a1', name='Old Name')]))
+    push.cmd_push(ws, loader.load_version_raw(ws.versions_dir / '2.1'), dry_run=True,
+                  client=client)
+    printed = capsys.readouterr().out
+    assert '- store old,words' in printed
+    assert '+ new   gps,compass' in printed
+    assert 'Old Name' in printed and 'Trailwise' in printed
+
+
+def test_push_sends_nothing_when_the_store_already_matches(ws, capsys):
+    client = FakeClient(collections=base_collections(
+        version_locales=[localization('en-US', 'l1', keywords='gps,compass',
+                                      description='What the app does.',
+                                      supportUrl='https://example.test/support')],
+        info_locales=[localization('en-US', 'a1', name='Trailwise',
+                                   subtitle='Offline Maps')]))
+    assert push.cmd_push(ws, loader.load_version_raw(ws.versions_dir / '2.1'),
+                         client=client) == 0
+    assert 'nothing to send' in capsys.readouterr().out
+    assert not [c for c in client.calls if c[0] in ('PATCH', 'POST')]
+
+
+def test_push_skips_the_locales_that_already_match(ws, capsys):
+    root = write_workspace(ws.root.parent / 'aso2', versions={'2.1': {'m.yaml': """\
+locales:
+  en-US:
+    name: Trailwise
+    keywords: new,words
+  de-DE:
+    name: Trailwise
+    keywords: karte
+"""}})
+    workspace_two = workspace.load(explicit=str(root))
+    client = FakeClient(collections=base_collections(
+        version_locales=[localization('en-US', 'l1', keywords='old'),
+                         localization('de-DE', 'l2', keywords='karte')],
+        info_locales=[localization('en-US', 'a1', name='Trailwise'),
+                      localization('de-DE', 'a2', name='Trailwise')]))
+    push.cmd_push(workspace_two, loader.load_version_raw(root / 'versions' / '2.1'),
+                  client=client)
+    printed = capsys.readouterr().out
+    assert 'Sent: 1' in printed and 'Already correct: 1' in printed
+    assert not any(path.endswith('/l2') for _m, path, _b in client.calls)
+
+
+def test_push_keeps_a_backup_of_the_store(ws):
+    client = FakeClient(collections=base_collections(
+        version_locales=[localization('en-US', 'l1', keywords='old,words')],
+        info_locales=[localization('en-US', 'a1', name='Old Name')]))
+    push.cmd_push(ws, loader.load_version_raw(ws.versions_dir / '2.1'), client=client)
+    backups = sorted((ws.state_dir / 'backups').iterdir())
+    assert backups
+    saved = loader.load_version_raw(backups[-1])
+    assert saved['en-US']['keywords'] == 'old,words'
+    assert (backups[-1] / 'README.txt').is_file()
+
+
+def test_push_can_skip_the_backup(ws):
+    client = FakeClient(collections=base_collections(
+        version_locales=[localization('en-US', 'l1', keywords='old')],
+        info_locales=[localization('en-US', 'a1', name='Old')]))
+    push.cmd_push(ws, loader.load_version_raw(ws.versions_dir / '2.1'), backup=False,
+                  client=client)
+    assert not (ws.state_dir / 'backups').exists()
+
+
+def test_push_remembers_what_it_sent(ws):
+    from aso_advisor import db
+
+    client = FakeClient(collections=base_collections(
+        version_locales=[localization('en-US', 'l1', keywords='old')],
+        info_locales=[localization('en-US', 'a1', name='Old')]))
+    push.cmd_push(ws, loader.load_version_raw(ws.versions_dir / '2.1'),
+                  version_name='2.1', client=client)
+    conn = db.connect(ws.db_path)
+    remembered, _stamp, source = db.load_sync_snapshot(conn, '2.1')
+    conn.close()
+    assert remembered['en-US']['keywords'] == 'gps,compass'
+    assert source == 'push'

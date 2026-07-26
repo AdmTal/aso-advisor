@@ -296,6 +296,26 @@ Two kinds of key are ignored on purpose:
 The locale code must be a code that App Store Connect accepts: `en-US`,
 `en-GB`, `de-DE`, `pt-BR`, `zh-Hans`, and so on.
 
+### In-app purchases
+
+A version file can also hold an `in_app_purchases:` block. The display name of
+a product is 30 characters that the store indexes, and the description adds 45
+more:
+
+```yaml
+in_app_purchases:
+  - product_id: com.example.pro
+    reference_name: Pro unlock          # a note for you, not indexed
+    locales:
+      en-US:
+        name: Offline Park Packs        # 30 characters, indexed
+        description: Download a park and walk with no signal.   # 45 characters
+```
+
+The audit checks the lengths, tells you when a name only repeats words that you
+already index, and reports the locales where a product has no translation. The
+tool does not push in-app purchases; change them in App Store Connect.
+
 ---
 
 ## Versions
@@ -395,8 +415,25 @@ only the sets that changed. It can also read a tree that lives outside the
 workspace, for example the export folder of a design tool. See
 [app-store-connect.md](app-store-connect.md).
 
-Screenshot captions are indexed text. Write real search phrases in them, not
-slogans. See [concepts.md](concepts.md).
+### Captions
+
+The store indexes the text in your screenshot captions, and no tool can read
+the text inside an image. Write the captions in `assets/captions.yaml`:
+
+```yaml
+locales:
+  en-US:
+    - Offline maps for the whole park
+    - See every metre of climb before you go
+  de-DE:
+    iphone-6.9:                       # a list per device, when they differ
+      - Offline-Karten für den ganzen Park
+```
+
+One line per screenshot, in the display order. The audit then checks that the
+captions hold words of your target phrases, that they are short enough to read
+in one second, and that their number matches the number of screenshots. The
+rules stay quiet until the file exists.
 
 ---
 

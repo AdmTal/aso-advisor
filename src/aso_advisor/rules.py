@@ -38,6 +38,7 @@ class RuleContext:
     version: str = '?'
     prev_locales: dict = field(default_factory=dict)
     prev_version: str = ''
+    iap: list = field(default_factory=list)      # in-app purchases, see loader.load_iap
 
     @property
     def primary_group(self):
@@ -72,6 +73,7 @@ ALL_RULES = [
     'DUP_XLOC', 'DUP_XLOC_STRUCT', 'TITLE_REDUNDANT', 'PLURAL', 'LOWVALUE',
     'TRADEMARK', 'TRADEMARK_SOFT', 'BRAND', 'PHRASE', 'SEED', 'STRATEGY',
     'PROMO', 'WHATSNEW', 'LOCALE', 'DIFF',
+    'IAP_LIMIT', 'IAP_DUP', 'IAP_LOCALE', 'IAP_SEED',
 ]
 
 RULE_HELP = {
@@ -101,6 +103,10 @@ RULE_HELP = {
     'WHATSNEW': 'LOW. The release notes are thin.',
     'LOCALE': 'LOW. A locale on your priority list has no metadata.',
     'DIFF': 'INFO. What changed since the version before.',
+    'IAP_LIMIT': 'CRITICAL. An in-app purchase name or description is too long.',
+    'IAP_DUP': 'MEDIUM. An in-app purchase name repeats words that you index.',
+    'IAP_LOCALE': 'LOW. An in-app purchase is not localized in every locale.',
+    'IAP_SEED': 'LOW. An in-app purchase name could carry a keyword that you miss.',
     'ASSET_MISSING': 'MEDIUM. A required locale has no screenshots.',
     'ASSET_ORPHAN': 'LOW. An assets directory has no metadata locale.',
     'ASSET_COUNT': 'CRITICAL. A set has more files than the store accepts.',
@@ -109,6 +115,10 @@ RULE_HELP = {
     'ASSET_VIDEO_LENGTH': 'HIGH. An app preview is not 15 to 30 seconds long.',
     'ASSET_DEVICE': 'LOW. The device directory is missing or not known.',
     'ASSET_ORDER': 'LOW. The file names do not show the display order.',
+    'CAPTION_KEYWORDS': 'MEDIUM. No screenshot caption holds a target-phrase word.',
+    'CAPTION_MISSING': 'LOW. A required locale is not in captions.yaml.',
+    'CAPTION_LONG': 'LOW. A caption is too long to read in one second.',
+    'CAPTION_COUNT': 'LOW. The captions and the screenshots are not the same number.',
 }
 
 
@@ -139,6 +149,10 @@ def run_all(ctx, disabled=()):
         check_strategy_notes,
         check_conversion_fields,
         check_locale_coverage,
+        check_iap_limits,
+        check_iap_duplicates,
+        check_iap_locales,
+        check_iap_opportunities,
         check_changelog,
     ):
         out.extend(fn(ctx))
@@ -873,6 +887,112 @@ def check_locale_coverage(ctx):
         detail='Each localization adds 100 keyword characters and 60 title and subtitle '
                f'characters of indexing in its storefronts. Priorities: {lines}',
         fix='Copy the nearest localization that exists and translate it.',
+    )]
+
+
+
+# -- in-app purchases ---------------------------------------------------------
+#
+# The display name of an in-app purchase is 30 characters that the store
+# indexes, and the description adds 45 more. Five products are therefore 375
+# characters of keyword surface that most apps never use. Declare the products
+# in the `in_app_purchases:` block of the version, and these rules check them.
+
+IAP_NAME_LIMIT = 30
+IAP_DESCRIPTION_LIMIT = 45
+
+
+def check_iap_limits(ctx):
+    """App Store Connect refuses a name or a description that is too long."""
+    out = []
+    for product in ctx.iap:
+        for code, fields in sorted(product['locales'].items()):
+            for key, limit in (('name', IAP_NAME_LIMIT),
+                               ('description', IAP_DESCRIPTION_LIMIT)):
+                value = fields.get(key) or ''
+                if len(value) > limit:
+                    out.append(Suggestion(
+                        'IAP_LIMIT', f'{product["product_id"]}:{code}:{key}', code,
+                        'CRITICAL',
+                        f'{code}: the in-app purchase {key} of '
+                        f'{product["product_id"]} is {len(value)}/{limit} characters',
+                        detail='App Store Connect refuses it.',
+                        fix=f'Cut the {key} to {limit} characters.',
+                    ))
+    return out
+
+
+def check_iap_duplicates(ctx):
+    """An in-app purchase name that only repeats words that you already index."""
+    out = []
+    for product in ctx.iap:
+        for code, fields in sorted(product['locales'].items()):
+            name = fields.get('name') or ''
+            meta = ctx.locales.get(code)
+            if not name or meta is None or meta.is_non_spaced:
+                continue
+            words = {w for w in tokens(name) if w not in IMPLICIT_TOKENS and len(w) > 2}
+            if not words:
+                continue
+            fresh = words - meta.indexed_tokens
+            if fresh:
+                continue
+            out.append(Suggestion(
+                'IAP_DUP', f'{product["product_id"]}:{code}', code, 'MEDIUM',
+                f'{code}: the in-app purchase name "{name}" adds no new search word',
+                detail='The store indexes the name of an in-app purchase. Every word '
+                       'of this one is already in the title, the subtitle, or the '
+                       'keyword field of the same locale, so the 30 characters buy '
+                       'nothing.',
+                fix='Rename the product with a word that you index nowhere. The name '
+                    'must still say plainly what the user buys.',
+            ))
+    return out
+
+
+def check_iap_locales(ctx):
+    """An in-app purchase that is localized in fewer locales than the app."""
+    if not ctx.iap:
+        return []
+    app_locales = {code for code, meta in ctx.locales.items() if meta.name}
+    out = []
+    for product in ctx.iap:
+        missing = sorted(app_locales - set(product['locales']))
+        if not missing:
+            continue
+        out.append(Suggestion(
+            'IAP_LOCALE', product['product_id'], 'global', 'LOW',
+            f'{product["product_id"]} is not localized in {len(missing)} locale(s): '
+            f'{_fmt_terms(missing, 6)}',
+            detail='Those storefronts index no word from this product, and the users '
+                   'there read the name in another language before they pay.',
+            fix='Add the missing locales to the `in_app_purchases:` block, then '
+                'translate the name and the description in App Store Connect.',
+        ))
+    return out
+
+
+def check_iap_opportunities(ctx):
+    """Seed keywords that an in-app purchase name could carry."""
+    if not ctx.iap:
+        return []
+    gid = ctx.primary_group
+    missing = [(term, score) for term, score, _why in uncovered_seeds(ctx, gid)
+               if score >= 6 and term.isascii()]
+    if not missing:
+        return []
+    names = ', '.join(f'"{fields["name"]}"' for product in ctx.iap
+                      for code, fields in product['locales'].items()
+                      if code == ctx.primary_locale and fields.get('name'))
+    terms = ', '.join(term for term, _score in missing[:4])
+    return [Suggestion(
+        'IAP_SEED', f'{gid}:{terms}', gid, 'LOW',
+        f'An in-app purchase name could carry a keyword that you index nowhere: {terms}',
+        detail=f'The store indexes the name of every in-app purchase, and you have '
+               f'{len(ctx.iap)} product(s) ({names or "no name in the primary locale"}). '
+               'A product name is free indexing surface that no user reads as metadata.',
+        fix='Work one of these words into a product name, if the name still says '
+            'plainly what the user buys.',
     )]
 
 
